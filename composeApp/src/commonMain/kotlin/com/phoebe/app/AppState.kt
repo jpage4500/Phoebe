@@ -97,6 +97,7 @@ import com.phoebe.app.domain.RecentSearchItem
 import com.phoebe.app.platform.MemoryPressureLevel
 import com.phoebe.app.platform.PhoebeAppLifecycle
 import com.phoebe.app.platform.PhoebeLog
+import com.phoebe.app.platform.logDetail
 import com.phoebe.app.platform.shouldDeferCatalogMemoryUpdates
 import com.phoebe.app.platform.currentNetworkIdentity
 import com.phoebe.app.platform.currentNetworkMeteringStatus
@@ -1444,6 +1445,7 @@ class AppState(
             val server = runCatching {
                 dependencies.sessionRepository.signInJellyfin(serverUrl, username, password)
             }.onFailure { error ->
+                PhoebeLog.w("AppState", "Jellyfin sign-in to $serverUrl failed: ${error.logDetail()}", error)
                 mutableMessage.value = error.message ?: "Couldn't sign in to Jellyfin."
             }.getOrNull() ?: return@launch
             mutableServers.value = listOf(server)
@@ -1543,6 +1545,7 @@ class AppState(
         mutableMessage.value = "Searching your local network for Jellyfin servers…"
         val found = runCatching { discoverJellyfinServersOnNetwork() }
             .onFailure { error ->
+                PhoebeLog.w("AppState", "Jellyfin discovery failed: ${error.logDetail()}", error)
                 mutableMessage.value = error.message ?: "Couldn't search for Jellyfin servers."
             }
             .getOrDefault(emptyList())
@@ -1564,6 +1567,7 @@ class AppState(
         val quickConnect = runCatching {
             dependencies.sessionRepository.startJellyfinQuickConnect(serverUrl)
         }.onFailure { error ->
+            PhoebeLog.w("AppState", "Jellyfin Quick Connect start on $serverUrl failed: ${error.logDetail()}", error)
             mutableMessage.value = error.message ?: "Couldn't start Jellyfin Quick Connect."
         }.getOrNull() ?: return@launch
         mutableJellyfinQuickConnect.value = quickConnect
@@ -1586,6 +1590,7 @@ class AppState(
             val server = runCatching {
                 dependencies.sessionRepository.completeJellyfinQuickConnect(serverUrl, quickConnect.Secret)
             }.onFailure { error ->
+                PhoebeLog.w("AppState", "Jellyfin Quick Connect finish on $serverUrl failed: ${error.logDetail()}", error)
                 mutableMessage.value = error.message ?: "That Jellyfin Quick Connect code is not approved yet."
             }.getOrNull() ?: return@launch
             mutableJellyfinQuickConnect.value = null

@@ -1,5 +1,6 @@
 package com.phoebe.app.platform
 
+import co.touchlab.kermit.LogWriter
 import androidx.compose.runtime.Composable
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
@@ -42,6 +43,7 @@ private val Ipv4PreferredDns = Dns { hostname ->
 
 actual fun createPlatformHttpClient(): HttpClient = HttpClient(OkHttp) {
     engine { applyPhoebeOkHttpEngine() }
+    installHttpLog()
     install(HttpTimeout) {
         requestTimeoutMillis = 90_000
         connectTimeoutMillis = 8_000
@@ -354,6 +356,7 @@ actual suspend fun discoverJellyfinServers() = withContext(Dispatchers.IO) {
             val query = "Who is JellyfinServer?".toByteArray(Charsets.UTF_8)
             val packet = DatagramPacket(query, query.size, InetAddress.getByName("255.255.255.255"), JellyfinDiscoveryPort)
             socket.send(packet)
+            PhoebeLog.d(DiscoveryLogTag, "sent discovery broadcast to 255.255.255.255:$JellyfinDiscoveryPort")
             val deadline = System.currentTimeMillis() + 1_200L
             while (System.currentTimeMillis() < deadline) {
                 val buffer = ByteArray(4096)
@@ -361,14 +364,23 @@ actual suspend fun discoverJellyfinServers() = withContext(Dispatchers.IO) {
                 try {
                     socket.receive(response)
                     val payload = response.data.decodeToString(0, response.length)
-                    val server = parseJellyfinDiscoveryServer(payload) ?: continue
+                    val source = response.address?.hostAddress
+                    PhoebeLog.d(DiscoveryLogTag, "reply from $source: $payload")
+                    val server = parseJellyfinDiscoveryServer(payload, source)
+                    if (server == null) {
+                        PhoebeLog.w(DiscoveryLogTag, "ignoring unparseable reply from $source")
+                        continue
+                    }
                     found[server.id] = server
                 } catch (_: SocketTimeoutException) {
                     // Keep listening until the short discovery window closes.
                 }
             }
         }
+    }.onFailure { error ->
+        PhoebeLog.w(DiscoveryLogTag, "discovery failed: ${error.logDetail()}", error)
     }
+    PhoebeLog.d(DiscoveryLogTag, "discovery finished: ${found.values.map { it.uri }}")
     found.values.toList()
 }
 
@@ -462,11 +474,18 @@ actual fun localHostIpAddresses(): List<String> = runCatching {
 actual fun isDebugBuild(): Boolean =
     System.getProperty("phoebe.debug")?.toBooleanStrictOrNull() ?: false
 
-internal actual fun platformLog(tag: String, message: String) {
-    println("[$tag] $message")
+internal actual fun createPlatformLogWriter(): LogWriter = DesktopLogWriter()
+
+private class DesktopLogWriter : AppLogWriter() {
+    private val timeFormat = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
+
+    override fun timestamp(): String = java.time.LocalTime.now().format(timeFormat)
+
+    override fun threadId(): String = Thread.currentThread().name.take(12).trim()
 }
 
 private const val JellyfinDiscoveryPort = 7359
+private const val DiscoveryLogTag = "JellyfinDiscovery"
 
 private val platformNetworkJson = Json {
     ignoreUnknownKeys = true

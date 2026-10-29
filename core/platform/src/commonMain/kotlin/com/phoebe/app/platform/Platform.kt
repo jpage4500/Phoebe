@@ -168,18 +168,32 @@ internal data class JellyfinDiscoveryResponse(
 
 private val jellyfinDiscoveryJson = Json { ignoreUnknownKeys = true }
 
-internal fun parseJellyfinDiscoveryServer(payload: String): PlexServer? {
+internal fun parseJellyfinDiscoveryServer(payload: String, sourceHost: String? = null): PlexServer? {
     val response = runCatching {
         jellyfinDiscoveryJson.decodeFromString<JellyfinDiscoveryResponse>(payload)
     }.getOrNull() ?: return null
-    val address = response.Address?.trimEnd('/')?.takeIf { it.startsWith("http://") || it.startsWith("https://") } ?: return null
-    val rawId = response.Id?.takeIf { it.isNotBlank() } ?: address.hashCode().toUInt().toString(16)
+    val advertised = response.Address?.trimEnd('/')?.takeIf { it.startsWith("http://") || it.startsWith("https://") } ?: return null
+    // Servers in Docker advertise their container IP; the host that answered the broadcast is reachable.
+    val fromSource = sourceHost?.takeIf { it.isNotBlank() }?.let { advertised.withHost(it) }
+    val addresses = listOfNotNull(fromSource, advertised).distinct()
+    val address = addresses.first()
+    val rawId = response.Id?.takeIf { it.isNotBlank() } ?: advertised.hashCode().toUInt().toString(16)
     return PlexServer(
         id = if (rawId.startsWith("jellyfin:")) rawId else "jellyfin:$rawId",
         name = response.Name?.takeIf { it.isNotBlank() } ?: address.removePrefix("https://").removePrefix("http://"),
         uri = address,
         owned = true,
-        connectionUris = listOf(address),
-        localConnectionUris = listOf(address),
+        connectionUris = addresses,
+        localConnectionUris = addresses,
     )
+}
+
+private fun String.withHost(host: String): String {
+    val scheme = substringBefore("://")
+    val rest = substringAfter("://")
+    val authority = rest.substringBefore('/')
+    val path = rest.substring(authority.length)
+    val port = authority.substringAfterLast(':', "").takeIf { it.isNotEmpty() && it.all(Char::isDigit) }
+    val hostPart = if (host.contains(':')) "[$host]" else host
+    return "$scheme://$hostPart${port?.let { ":$it" }.orEmpty()}$path"
 }

@@ -44,6 +44,7 @@ kotlin {
             kotlin.srcDir(phoebeBuildInfoOutput)
             dependencies {
                 implementation(project(":domain"))
+                api(libs.kermit)
                 implementation(libs.coroutines.core)
                 implementation(libs.ktor.client.core)
                 implementation(libs.ktor.client.content.negotiation)

@@ -1,5 +1,7 @@
 package com.phoebe.app.platform
 
+import co.touchlab.kermit.LogWriter
+import co.touchlab.kermit.OSLogWriter
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import com.phoebe.app.domain.PlexServer
@@ -85,6 +87,7 @@ actual fun createPlatformHttpClient(): HttpClient = HttpClient(Darwin) {
             setAllowsCellularAccess(true)
         }
     }
+    installHttpLog()
     install(HttpTimeout) {
         requestTimeoutMillis = 60_000
         connectTimeoutMillis = 15_000
@@ -265,7 +268,10 @@ private fun iosIpv4SubnetMaterial(): String = memScoped {
     }
 }
 
-actual suspend fun discoverJellyfinServers(): List<PlexServer> = emptyList()
+actual suspend fun discoverJellyfinServers(): List<PlexServer> {
+    PhoebeLog.w("JellyfinDiscovery", "local server discovery is not implemented on iOS")
+    return emptyList()
+}
 
 actual class PlatformStorage actual constructor() {
     private val defaults = NSUserDefaults.standardUserDefaults
@@ -503,6 +509,6 @@ actual fun getBroadcastAddresses(): List<String> = emptyList()
 
 actual fun localHostIpAddresses(): List<String> = emptyList()
 
-internal actual fun platformLog(tag: String, message: String) {
-    println("[$tag] $message")
-}
+// OSLog rather than println: println only reaches Xcode's console, while OSLog also shows up in
+// Console.app for a device that wasn't launched from Xcode
+internal actual fun createPlatformLogWriter(): LogWriter = OSLogWriter()

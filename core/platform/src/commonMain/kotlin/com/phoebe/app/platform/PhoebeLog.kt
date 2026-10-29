@@ -1,35 +1,62 @@
 package com.phoebe.app.platform
 
+import co.touchlab.kermit.LogWriter
+import co.touchlab.kermit.Logger
+import co.touchlab.kermit.LoggerConfig
+import co.touchlab.kermit.Severity
 import com.phoebe.app.telemetry.Telemetry
 
 /** True for local/dev builds; false for store/release artifacts. */
 expect fun isDebugBuild(): Boolean
 
 /**
- * Local platform output is debug-only; telemetry still receives logs when configured.
+ * Logging facade over Kermit. Local console output (Logcat, OSLog, stdout) is debug-only;
+ * telemetry still receives logs when configured.
  * Prefer [v] for high-volume traces and [d] for lifecycle / error detail.
  */
 object PhoebeLog {
-    fun v(tag: String, message: String) {
-        if (isDebugBuild()) platformLog(tag, message)
-        Telemetry.log(tag, message)
+    // one config shared by every logger, so the writer list is decided in a single place
+    private val config = object : LoggerConfig {
+        override val logWriterList: List<LogWriter> by lazy {
+            listOfNotNull(
+                createPlatformLogWriter().takeIf { isDebugBuild() },
+                TelemetryLogWriter,
+            )
+        }
+        override val minSeverity: Severity = Severity.Verbose
     }
 
-    fun v(tag: String, lazyMessage: () -> String) {
-        val message = lazyMessage()
-        if (isDebugBuild()) platformLog(tag, message)
-        Telemetry.log(tag, message)
-    }
+    private val default = Logger(config, "Phoebe")
 
-    fun d(tag: String, message: String) {
-        if (isDebugBuild()) platformLog(tag, message)
-        Telemetry.log(tag, message)
-    }
+    /** Kermit logger for a class that logs a lot under one tag: `private val log = PhoebeLog.logger("Tag")`. */
+    fun logger(tag: String): Logger = Logger(config, tag)
 
-    fun d(tag: String, lazyMessage: () -> String) {
-        val message = lazyMessage()
-        if (isDebugBuild()) platformLog(tag, message)
-        Telemetry.log(tag, message)
+    fun v(tag: String, message: String) = default.v(message, tag = tag)
+
+    fun v(tag: String, lazyMessage: () -> String) = default.v(tag = tag, message = lazyMessage)
+
+    fun d(tag: String, message: String) = default.d(message, tag = tag)
+
+    fun d(tag: String, lazyMessage: () -> String) = default.d(tag = tag, message = lazyMessage)
+
+    fun i(tag: String, message: String) = default.i(message, tag = tag)
+
+    fun w(tag: String, message: String, throwable: Throwable? = null) = default.w(message, throwable, tag)
+
+    fun e(tag: String, message: String, throwable: Throwable? = null) = default.e(message, throwable, tag)
+}
+
+/**
+ * Forwards logs to [Telemetry]. HTTP request traces stay local unless they are warnings or worse,
+ * so routine request URLs never leave the device.
+ */
+private object TelemetryLogWriter : LogWriter() {
+    override fun isLoggable(tag: String, severity: Severity): Boolean =
+        tag != HttpLog.Tag || severity >= Severity.Warn
+
+    override fun log(severity: Severity, message: String, tag: String, throwable: Throwable?) {
+        val detail = throwable?.let { " (${it.logDetail()})" }.orEmpty()
+        Telemetry.log(tag, HttpLog.redact(message) + detail)
     }
 }
 
@@ -56,4 +83,5 @@ private fun redactUrlQueryParams(text: String): String =
         match.groupValues[1]
     }
 
-internal expect fun platformLog(tag: String, message: String)
+/** Console writer for this platform; only used in debug builds. */
+internal expect fun createPlatformLogWriter(): LogWriter

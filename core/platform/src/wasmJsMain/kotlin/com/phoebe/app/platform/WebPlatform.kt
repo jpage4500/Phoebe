@@ -1,5 +1,6 @@
 package com.phoebe.app.platform
 
+import co.touchlab.kermit.LogWriter
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import com.phoebe.app.domain.PlexServer
@@ -22,6 +23,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 actual fun createPlatformHttpClient(): HttpClient = HttpClient(Js) {
+    installHttpLog()
     install(HttpTimeout) {
         requestTimeoutMillis = WebDownloadTimeoutMillis
         connectTimeoutMillis = 15_000
@@ -347,9 +349,7 @@ actual fun isDebugBuild(): Boolean = wasmDebugBuildEnabled()
 )
 private external fun wasmDebugBuildEnabled(): Boolean
 
-internal actual fun platformLog(tag: String, message: String) {
-    println("[$tag] $message")
-}
+internal actual fun createPlatformLogWriter(): LogWriter = AppLogWriter()
 
 private val platformNetworkJson = Json {
     ignoreUnknownKeys = true
