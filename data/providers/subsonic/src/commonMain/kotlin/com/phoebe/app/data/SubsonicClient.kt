@@ -277,6 +277,7 @@ class SubsonicClient(
                     albumCount = it.albumCount ?: 0,
                     thumbUrl = it.coverArt?.let { cover -> coverArtUrl(server.uri, username, password, cover) },
                     favorite = it.starred != null,
+                    rating = it.userRating?.takeIf { rating -> rating > 0 }?.toFloat()?.coerceIn(0f, 5f),
                 )
             }
     }
@@ -513,6 +514,52 @@ class SubsonicClient(
             ?.id
     }
 
+    /**
+     * Artist biography and similar artists via `getArtistInfo2`. Navidrome fills both from its external
+     * agents (Last.fm/Spotify), so without them configured this comes back empty. Similar artists are
+     * limited to ones present in the library. Returned artist IDs are bare (unprefixed).
+     */
+    suspend fun artistInfo(
+        server: PlexServer,
+        username: String,
+        password: String,
+        artistId: String,
+        similarCount: Int = ArtistInfoSimilarCount,
+    ): SubsonicArtistInfo {
+        val response = request<SubsonicArtistInfo2Root>(server.uri, username, password, "getArtistInfo2") {
+            parameter("id", artistId.removePrefix("navidrome:"))
+            parameter("count", similarCount.coerceAtLeast(1))
+            parameter("includeNotPresent", false)
+        }
+        val info = response.response.artistInfo2 ?: return SubsonicArtistInfo()
+        return SubsonicArtistInfo(
+            biography = info.biography?.subsonicBiographyPlainText(),
+            similarArtists = info.similarArtist.map {
+                Artist(
+                    id = it.id,
+                    title = it.name,
+                    albumCount = it.albumCount ?: 0,
+                    thumbUrl = it.coverArt?.let { cover -> coverArtUrl(server.uri, username, password, cover) },
+                    favorite = it.starred != null,
+                    rating = it.userRating?.takeIf { rating -> rating > 0 }?.toFloat()?.coerceIn(0f, 5f),
+                )
+            },
+        )
+    }
+
+    /**
+     * The artist's most popular songs that exist in the library, via `getTopSongs`. Navidrome ranks
+     * them with its external agents (Last.fm), so this is empty when none are configured.
+     */
+    suspend fun topSongs(server: PlexServer, username: String, password: String, artistName: String, count: Int = 20): List<Track> {
+        val name = artistName.trim().takeIf { it.isNotBlank() } ?: return emptyList()
+        val response = request<SubsonicTopSongsRoot>(server.uri, username, password, "getTopSongs") {
+            parameter("artist", name)
+            parameter("count", count.coerceIn(1, SubsonicPageSize))
+        }
+        return response.response.topSongs?.song.orEmpty().map { it.toTrack(server.uri, username, password) }
+    }
+
     suspend fun artistTracks(
         server: PlexServer,
         username: String,
@@ -618,6 +665,7 @@ class SubsonicClient(
         const val ArtistRadioTrackCount = 50
         const val ArtistRadioMinSimilarTracks = 10
         const val ArtistRadioMaxSeedAlbums = 8
+        const val ArtistInfoSimilarCount = 20
         var saltCounter = 1
     }
 }
@@ -718,6 +766,44 @@ private data class SubsonicStarred2Root(@SerialName("subsonic-response") val res
 private data class SubsonicInternetRadioStationsRoot(@SerialName("subsonic-response") val response: SubsonicResponse = SubsonicResponse())
 
 @Serializable
+private data class SubsonicArtistInfo2Root(@SerialName("subsonic-response") val response: SubsonicResponse = SubsonicResponse())
+
+@Serializable
+private data class SubsonicTopSongsRoot(@SerialName("subsonic-response") val response: SubsonicResponse = SubsonicResponse())
+
+@Serializable
+private data class SubsonicArtistInfo2Dto(
+    val biography: String? = null,
+    val similarArtist: List<SubsonicArtistDto> = emptyList(),
+)
+
+/** Result of [SubsonicClient.artistInfo]; artist IDs are bare server IDs. */
+data class SubsonicArtistInfo(
+    val biography: String? = null,
+    val similarArtists: List<Artist> = emptyList(),
+)
+
+/**
+ * Navidrome passes the Last.fm bio through as HTML that ends in a "Read more on Last.fm" link.
+ * Drop that link and any other tags, decode the common entities, and return null when nothing is left.
+ */
+internal fun String.subsonicBiographyPlainText(): String? {
+    val withoutReadMore = replace(Regex("""<a\b[^>]*>\s*Read more on Last\.fm\s*</a>\.?""", RegexOption.IGNORE_CASE), "")
+    val text = withoutReadMore
+        .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("""<[^>]+>"""), "")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .trim()
+    return text.takeIf { it.isNotBlank() }
+}
+
+@Serializable
 private data class SubsonicResponse(
     val status: String? = null,
     val error: SubsonicErrorDto? = null,
@@ -735,6 +821,8 @@ private data class SubsonicResponse(
     val artist: SubsonicArtistWithAlbumsDto? = null,
     val starred2: SubsonicStarred2? = null,
     val internetRadioStations: SubsonicInternetRadioStations? = null,
+    val artistInfo2: SubsonicArtistInfo2Dto? = null,
+    val topSongs: SubsonicSongs? = null,
 )
 
 @Serializable
@@ -780,6 +868,7 @@ private data class SubsonicArtistDto(
     val albumCount: Int? = null,
     val coverArt: String? = null,
     val starred: String? = null,
+    val userRating: Int? = null,
 )
 
 @Serializable

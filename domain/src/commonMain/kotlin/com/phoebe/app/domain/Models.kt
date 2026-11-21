@@ -1891,6 +1891,8 @@ data class CatalogSnapshot(
     val popularTracksByArtist: Map<String, List<Track>> = emptyMap(),
     val popularTracksByLibrary: Map<String, List<Track>> = emptyMap(),
     val similarArtistsByArtist: Map<String, List<Artist>> = emptyMap(),
+    /** Artist biographies fetched on demand (e.g. Navidrome `getArtistInfo2`), keyed by artist id. */
+    val artistBiographyByArtist: Map<String, String> = emptyMap(),
     val collectionValues: List<CatalogCollectionValue> = emptyList(),
     val collectionValueLoads: List<CatalogCollectionValueLoad> = emptyList(),
     val collectionTags: List<CatalogCollectionTag> = emptyList(),

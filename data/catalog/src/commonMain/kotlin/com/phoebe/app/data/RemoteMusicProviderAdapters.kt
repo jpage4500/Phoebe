@@ -12,7 +12,9 @@ import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
+import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.currentTimeMs
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -178,6 +180,7 @@ class NavidromeProviderAdapter(
     private var activeScrobbleKey: NavidromeScrobbleKey? = null
     private var submittedScrobbleKey: NavidromeScrobbleKey? = null
     private var submittedScrobbleAtMs: Long = 0L
+    private var nowPlayingKey: NavidromeScrobbleKey? = null
 
     override val providerType = MediaProviderType.Navidrome
     override val capabilities = ProviderCapabilities(
@@ -272,10 +275,13 @@ class NavidromeProviderAdapter(
                 activeScrobbleKey = scrobbleKey
                 submittedScrobbleKey = null
                 submittedScrobbleAtMs = 0L
+                nowPlayingKey = null
             } else if (event == JellyfinPlaybackEvent.Start && !wasScrobbledJustBeforePlaybackStart(scrobbleKey)) {
                 submittedScrobbleKey = null
                 submittedScrobbleAtMs = 0L
             }
+
+            reportNowPlaying(session, server, itemId, scrobbleKey, isPaused, event)
 
             val reachedPlayedThreshold = track.hasReachedSubsonicScrobbleThreshold(positionMs)
             if (event != JellyfinPlaybackEvent.Stop && !reachedPlayedThreshold) return@withLock
@@ -311,6 +317,41 @@ class NavidromeProviderAdapter(
             )
             submittedScrobbleKey = scrobbleKey
             submittedScrobbleAtMs = currentTimeMs()
+        }
+    }
+
+    /**
+     * `scrobble(submission=false)` puts the track in the server's "Now Playing" list (and forwards it to
+     * Last.fm/ListenBrainz now-playing when the user has those linked). Sent once per play; pausing clears
+     * it so resuming re-sends, since Navidrome expires the entry after roughly the track's duration.
+     * Failures are logged and never block the played scrobble. Caller holds [scrobbleMutex].
+     */
+    private suspend fun reportNowPlaying(
+        session: PlexSession,
+        server: PlexServer,
+        itemId: String,
+        scrobbleKey: NavidromeScrobbleKey,
+        isPaused: Boolean,
+        event: JellyfinPlaybackEvent,
+    ) {
+        if (event == JellyfinPlaybackEvent.Stop || isPaused) {
+            nowPlayingKey = null
+            return
+        }
+        if (nowPlayingKey == scrobbleKey) return
+        nowPlayingKey = scrobbleKey
+        try {
+            client.scrobble(
+                server = server,
+                username = session.userName,
+                password = session.token,
+                itemId = itemId,
+                submission = false,
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            PhoebeLog.d("NavidromeProviderAdapter") { "now playing report failed: ${error.message}" }
         }
     }
 

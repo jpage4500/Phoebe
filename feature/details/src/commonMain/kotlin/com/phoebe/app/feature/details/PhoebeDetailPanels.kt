@@ -2675,11 +2675,15 @@ fun ArtistDetailPanel(
                             }
                         }
                     }
-                    if (!artist.genre.isNullOrBlank() || !artist.mood.isNullOrBlank() || !artist.style.isNullOrBlank() || !artist.biography.isNullOrBlank()) {
+                    // Bios fetched on demand (Navidrome getArtistInfo2) live in the catalog, not on the route's artist.
+                    val aboutArtist = artist.biography?.takeIf { it.isNotBlank() }?.let { artist }
+                        ?: catalog.artistBiographyByArtist[artist.id]?.let { artist.copy(biography = it) }
+                        ?: artist
+                    if (!aboutArtist.genre.isNullOrBlank() || !aboutArtist.mood.isNullOrBlank() || !aboutArtist.style.isNullOrBlank() || !aboutArtist.biography.isNullOrBlank()) {
                         item(contentType = "artist-about") {
                             Box(contentPaddingModifier) {
                                 AboutArtistPanel(
-                                    artist = artist,
+                                    artist = aboutArtist,
                                     onCollectionItems = onCollectionItems,
                                 )
                             }
@@ -3092,6 +3096,15 @@ private fun ExpandableText(
     }
 }
 
+/**
+ * Artists the provider can rate. Navidrome artists synthesized from album tags (`navidrome:artist:…`)
+ * have no server id, so `setRating` has nothing to target.
+ */
+private fun Artist.supportsRemoteArtistRating(): Boolean =
+    id.startsWith("plex:") ||
+        id.startsWith("jellyfin:") ||
+        (id.startsWith("navidrome:") && !id.startsWith("navidrome:artist:"))
+
 @Composable
 private fun AboutArtistPanel(
     artist: Artist,
@@ -3101,7 +3114,7 @@ private fun AboutArtistPanel(
     Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("About", color = PhoebeUi.primaryText, fontSize = 22.sp, fontWeight = FontWeight.Normal)
         
-        if (ratingActions.ratingsEnabled && (artist.id.startsWith("plex:") || artist.id.startsWith("jellyfin:"))) {
+        if (ratingActions.ratingsEnabled && artist.supportsRemoteArtistRating()) {
             AboutSectionItem("Rating") {
                 RatingStars(
                     rating = ratingActions.ratingFor(artist),

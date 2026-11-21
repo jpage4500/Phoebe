@@ -3785,6 +3785,7 @@ class CatalogRepository(
 
     suspend fun ensurePopularTracksForArtist(session: PlexSession?, artist: Artist): List<Track> {
         mutableCatalog.value.popularTracksByArtist[artist.id]?.let { return it }
+        session?.takeIf { it.isNavidrome() }?.let { return ensureNavidromeTopSongs(it, artist) }
         val plexSession = session?.takeIf { it.isPlex() } ?: return emptyList()
         val ratingKey = plexRatingKey(artist.id) ?: return emptyList()
         val server = plexSession.selectedServer ?: return emptyList()
@@ -3935,6 +3936,7 @@ class CatalogRepository(
 
     suspend fun ensureSimilarArtistsForArtist(session: PlexSession?, artist: Artist): List<Artist> {
         mutableCatalog.value.similarArtistsByArtist[artist.id]?.let { return it }
+        session?.takeIf { it.isNavidrome() }?.let { return ensureNavidromeArtistInfo(it, artist) }
         val plexSession = session?.takeIf { it.isPlex() } ?: return emptyList()
         val ratingKey = plexRatingKey(artist.id) ?: return emptyList()
         val server = plexSession.selectedServer ?: return emptyList()
@@ -3966,6 +3968,75 @@ class CatalogRepository(
                     similarArtistsByArtist = cur.similarArtistsByArtist + (artist.id to similar),
                 )
             }
+        }
+        return similar
+    }
+
+    /** Navidrome `getTopSongs` (Last.fm-ranked, library-only). Cached even when empty; the UI then falls back to play history. */
+    private suspend fun ensureNavidromeTopSongs(session: PlexSession, artist: Artist): List<Track> {
+        if (!artist.id.startsWith("navidrome:")) return emptyList()
+        val server = session.selectedServer ?: return emptyList()
+        val password = session.token.takeIf { it.isNotBlank() } ?: return emptyList()
+        val tracks = subsonicClient.topSongs(
+            server = server,
+            username = session.userName,
+            password = password,
+            artistName = artist.title,
+            count = ArtistPopularTrackLimit,
+        ).map { it.withProviderPrefix("navidrome") }
+        publishNavidromeTracks(tracks)
+        catalogMergeMutex.withLock {
+            val cur = mutableCatalog.value
+            if (cur.popularTracksByArtist[artist.id] == null) {
+                mutableCatalog.value = cur.copy(
+                    popularTracksByArtist = cur.popularTracksByArtist + (artist.id to tracks),
+                )
+            }
+        }
+        return tracks
+    }
+
+    /**
+     * Navidrome `getArtistInfo2`: caches the biography and the server's similar artists. Similar artists
+     * are only cached when non-empty, because a cached empty list hides the artist page's local
+     * tag-based suggestions (servers without Last.fm return nothing).
+     */
+    private suspend fun ensureNavidromeArtistInfo(session: PlexSession, artist: Artist): List<Artist> {
+        if (!artist.id.startsWith("navidrome:")) return emptyList()
+        val server = session.selectedServer ?: return emptyList()
+        val password = session.token.takeIf { it.isNotBlank() } ?: return emptyList()
+        val bareId = artist.id.removePrefix("navidrome:")
+        // Artists derived from album tags get a synthetic id the server doesn't know; resolve those by name.
+        val serverArtistId = if (bareId.isSyntheticNavidromeArtistId()) {
+            subsonicClient.findArtistIdByName(server, session.userName, password, artist.title) ?: return emptyList()
+        } else {
+            bareId
+        }
+        val info = subsonicClient.artistInfo(server, session.userName, password, serverArtistId, ArtistSimilarArtistLimit)
+        val current = mutableCatalog.value
+        val byId = current.artists.associateBy { it.id }
+        val byTitle = current.artists.associateBy { it.title.normalizedArtistLookupKey() }
+        val similar = info.similarArtists
+            .map { candidate ->
+                byId["navidrome:${candidate.id}"]
+                    ?: byTitle[candidate.title.normalizedArtistLookupKey()]
+                    ?: candidate.copy(id = "navidrome:${candidate.id}")
+            }
+            .filter { candidate -> candidate.id != artist.id && !candidate.title.equals(artist.title, ignoreCase = true) }
+            .distinctBy { candidate -> candidate.id }
+            .take(ArtistSimilarArtistLimit)
+        val biography = info.biography
+        if (similar.isEmpty() && biography == null) return emptyList()
+        catalogMergeMutex.withLock {
+            val cur = mutableCatalog.value
+            var next = cur
+            if (similar.isNotEmpty() && cur.similarArtistsByArtist[artist.id] == null) {
+                next = next.copy(similarArtistsByArtist = next.similarArtistsByArtist + (artist.id to similar))
+            }
+            if (biography != null) {
+                next = next.copy(artistBiographyByArtist = next.artistBiographyByArtist + (artist.id to biography))
+            }
+            if (next !== cur) mutableCatalog.value = next
         }
         return similar
     }
@@ -9056,6 +9127,7 @@ private fun CatalogSnapshot.withoutProviderShell(prefix: String): CatalogSnapsho
         playlists = playlists.filterNot { it.id.startsWith(providerPrefix) },
         popularTracksByArtist = popularTracksByArtist.filterKeys { !it.startsWith(providerPrefix) },
         popularTracksByLibrary = popularTracksByLibrary.filterKeys { !it.startsWith(providerPrefix) },
+        artistBiographyByArtist = artistBiographyByArtist.filterKeys { !it.startsWith(providerPrefix) },
         collectionTags = collectionTags.filterNot { it.itemId.startsWith(providerPrefix) },
     )
 }
