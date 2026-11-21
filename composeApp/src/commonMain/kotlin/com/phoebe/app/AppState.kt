@@ -1,5 +1,6 @@
 package com.phoebe.app
 
+import com.phoebe.app.data.signInErrorMessage
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.AppSettings
@@ -351,6 +352,19 @@ class AppState(
 
     private val mutableAuthInProgress = MutableStateFlow(false)
     val authInProgress: StateFlow<Boolean> = mutableAuthInProgress
+    /** The last server sign-in failure, shown under the Sign in button; cleared on the next attempt. */
+    private val mutableSignInError = MutableStateFlow<String?>(null)
+    val signInError: StateFlow<String?> = mutableSignInError
+
+    fun clearSignInError() {
+        mutableSignInError.value = null
+    }
+
+    private fun reportSignInError(error: Throwable, providerName: String, serverUrl: String) {
+        val text = signInErrorMessage(error, providerName, serverUrl)
+        mutableMessage.value = text
+        mutableSignInError.value = text
+    }
 
     private val mutableMessage = MutableStateFlow("Sign in to your provider, or add a local music folder to get started.")
     val message: StateFlow<String> = mutableMessage
@@ -1457,11 +1471,12 @@ class AppState(
     fun signInJellyfin(serverUrl: String, username: String, password: String) = scope.launch {
         mutableAuthInProgress.value = true
         try {
+            mutableSignInError.value = null
             mutableMessage.value = "Signing in with Jellyfin…"
             val server = runCatching {
                 dependencies.sessionRepository.signInJellyfin(serverUrl, username, password)
             }.onFailure { error ->
-                mutableMessage.value = error.message ?: "Couldn't sign in to Jellyfin."
+                reportSignInError(error, "Jellyfin", serverUrl)
             }.getOrNull() ?: return@launch
             mutableServers.value = listOf(server)
             mutableLibraries.value = emptyList()
@@ -1488,11 +1503,12 @@ class AppState(
     ) = scope.launch {
         mutableAuthInProgress.value = true
         try {
+            mutableSignInError.value = null
             mutableMessage.value = "Signing in with ${type.displayName}…"
             val server = runCatching {
                 dependencies.sessionRepository.signInProvider(type, serverUrl, username, password)
             }.onFailure { error ->
-                mutableMessage.value = error.message ?: "Couldn't sign in to ${type.displayName}."
+                reportSignInError(error, type.displayName, serverUrl)
             }.getOrNull() ?: return@launch
             mutableServers.value = listOf(server)
             mutableLibraries.value = emptyList()
@@ -1566,15 +1582,17 @@ class AppState(
     }
 
     fun startJellyfinQuickConnect(serverUrl: String) = scope.launch {
+        mutableSignInError.value = null
         if (serverUrl.isBlank()) {
             mutableMessage.value = "Enter or choose a Jellyfin server URL first."
+            mutableSignInError.value = mutableMessage.value
             return@launch
         }
         mutableMessage.value = "Starting Jellyfin Quick Connect…"
         val quickConnect = runCatching {
             dependencies.sessionRepository.startJellyfinQuickConnect(serverUrl)
         }.onFailure { error ->
-            mutableMessage.value = error.message ?: "Couldn't start Jellyfin Quick Connect."
+            reportSignInError(error, "Jellyfin", serverUrl)
         }.getOrNull() ?: return@launch
         mutableJellyfinQuickConnect.value = quickConnect
         quickConnect.ServerUrl?.let { openExternalUrl(it) }
@@ -1592,11 +1610,12 @@ class AppState(
         }
         mutableAuthInProgress.value = true
         try {
+            mutableSignInError.value = null
             mutableMessage.value = "Finishing Jellyfin Quick Connect…"
             val server = runCatching {
                 dependencies.sessionRepository.completeJellyfinQuickConnect(serverUrl, quickConnect.Secret)
             }.onFailure { error ->
-                mutableMessage.value = error.message ?: "That Jellyfin Quick Connect code is not approved yet."
+                reportSignInError(error, "Jellyfin", serverUrl)
             }.getOrNull() ?: return@launch
             mutableJellyfinQuickConnect.value = null
             mutableServers.value = listOf(server)
