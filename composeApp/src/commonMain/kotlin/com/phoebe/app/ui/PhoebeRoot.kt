@@ -2611,7 +2611,7 @@ private fun PhoebeRootStateHolder(
                         settingsInitialCategory = if (browseSection == BrowseSection.Downloads) {
                             SettingsCategory.Downloads
                         } else {
-                            SettingsCategory.AudioPlayback
+                            SettingsCategory.Playback
                         },
                         listenBrainzCredentialAvailability = state.listenBrainzCredentialAvailability,
                         appUpdateState = appUpdateState,
