@@ -54,6 +54,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -455,6 +456,12 @@ fun MobilePlayer(
     }
     val currentTopInset = lerp(0.dp, expandedTopInset, clampedExpansionFraction)
 
+    // playerDragGestures never restarts its pointerInput, so route through the latest callbacks
+    // rather than the ones captured on first composition.
+    val latestOnDragStart by rememberUpdatedState(onDragStart)
+    val latestOnDrag by rememberUpdatedState(onDrag)
+    val latestOnDragEnd by rememberUpdatedState(onDragEnd)
+
     val cornerRadius = lerp(14.dp, 26.dp, clampedExpansionFraction)
     val containerShape = RoundedCornerShape(topStart = cornerRadius, topEnd = cornerRadius)
 
@@ -463,9 +470,9 @@ fun MobilePlayer(
             .padding(top = currentTopInset)
             .playerDragGestures(
                 expansionFraction = clampedExpansionFraction,
-                onDragStart = onDragStart,
-                onDrag = onDrag,
-                onDragEnd = onDragEnd,
+                onDragStart = { latestOnDragStart() },
+                onDrag = { latestOnDrag(it) },
+                onDragEnd = { latestOnDragEnd(it) },
             )
             .clip(containerShape)
             .border(

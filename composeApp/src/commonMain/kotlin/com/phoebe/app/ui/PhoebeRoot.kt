@@ -2270,8 +2270,10 @@ private fun PhoebeRootStateHolder(
                         var miniPlayerDragMode by remember { mutableStateOf(MiniPlayerDragMode.Expand) }
                         val onDragStart = {
                             scope.launch { playerExpansionFraction.stop() }
-                            val collapsed = playerExpansionFraction.value < 0.001f && !mobilePlayerAsSheet
-                            miniPlayerDragMode = if (collapsed) MiniPlayerDragMode.Undecided else MiniPlayerDragMode.Expand
+                            val collapsed = playerExpansionFraction.value < 0.001f
+                            // Only a paused bar can be dismissed, so a stray swipe never cuts off playback.
+                            val paused = !shellPlayback.isPlaying && !shellPlayback.isBuffering && !mobilePlaybackStarting
+                            miniPlayerDragMode = if (collapsed && paused) MiniPlayerDragMode.Undecided else MiniPlayerDragMode.Expand
                             miniPlayerDismissDragPx = 0f
                             Unit
                         }
