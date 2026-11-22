@@ -798,7 +798,7 @@ private fun MobileHomeContent(
             top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 10.dp,
             bottom = chromePadding.bottom + 10.dp,
         ),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         topBar?.let { header ->
             item(key = "top-bar", contentType = "top-bar") { header() }
@@ -1034,7 +1034,7 @@ private fun MobileExpandedHomeContent(
             top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 10.dp,
             bottom = chromePadding.bottom + 10.dp,
         ),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         topBar?.let { header ->
             item(key = "top-bar", contentType = "top-bar") { header() }
@@ -1170,7 +1170,7 @@ private fun ExpandedHomeShelf(
     horizontalSpacing: Dp = 10.dp,
     content: LazyListScope.() -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         SectionHeader(title, action, onAction)
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
@@ -1575,8 +1575,10 @@ private fun HomePlayedTablePanel(
     onDownload: (Track) -> Unit,
     showResolving: Boolean = false,
 ) {
-    HomePanel(Modifier.fillMaxWidth()) {
-        SectionHeader(title, "View all", onViewAll)
+    HomePanel(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)) {
+        Box(Modifier.padding(start = 6.dp)) {
+            SectionHeader(title, "View all", onViewAll)
+        }
         when {
             rows.isEmpty() && showResolving -> Box(
                 Modifier.fillMaxWidth().padding(vertical = 20.dp),
@@ -1633,13 +1635,13 @@ private fun HomePlayedTableRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .height(58.dp)
+            .height(54.dp)
             .clip(RoundedCornerShape(8.dp))
             .combinedClickable(onClick = onPlay, onLongClick = { menuExpanded = true })
             .background(if (isNowPlaying) PhoebeUi.accent.copy(alpha = 0.12f) else Color.Transparent)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            .padding(horizontal = 6.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
             rank.toString(),
@@ -1647,7 +1649,7 @@ private fun HomePlayedTableRow(
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center,
-            modifier = Modifier.width(20.dp),
+            modifier = Modifier.width(16.dp),
         )
         Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
             TrackArtworkImage(
@@ -1700,12 +1702,12 @@ private fun HomePlayedTableRow(
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             textAlign = TextAlign.End,
-            modifier = Modifier.width(66.dp),
+            modifier = Modifier.widthIn(min = 40.dp),
         )
         Box {
             Box(
                 Modifier
-                    .size(32.dp)
+                    .size(28.dp)
                     .clip(CircleShape)
                     .clickable { menuExpanded = true },
                 contentAlignment = Alignment.Center,
@@ -2872,13 +2874,12 @@ private fun DesktopRandomPanels(
 ) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         if (maxWidth < 820.dp) {
-            val randomPanelHeight = 336.dp
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                RandomArtistPanel(state.randomArtists.firstOrNull(), state.randomArtistStats, catalogRefreshing, onArtist, onRefreshArtists, onPrefetchArtist, Modifier.fillMaxWidth().height(randomPanelHeight), panelStyle = panelStyle)
-                RandomAlbumPanel(state.randomAlbums.firstOrNull(), state.randomAlbumStats, catalogRefreshing, albumArtworkFallbacks, onAlbum, onRefreshAlbums, onPrefetchAlbum, Modifier.fillMaxWidth().height(randomPanelHeight), panelStyle = panelStyle)
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                RandomArtistPanel(state.randomArtists.firstOrNull(), state.randomArtistStats, catalogRefreshing, onArtist, onRefreshArtists, onPrefetchArtist, Modifier.fillMaxWidth(), panelStyle = panelStyle, fillHeight = false)
+                RandomAlbumPanel(state.randomAlbums.firstOrNull(), state.randomAlbumStats, catalogRefreshing, albumArtworkFallbacks, onAlbum, onRefreshAlbums, onPrefetchAlbum, Modifier.fillMaxWidth(), panelStyle = panelStyle, fillHeight = false)
             }
         } else {
-            val randomPanelHeight = 304.dp
+            val randomPanelHeight = 264.dp
             Row(Modifier.fillMaxWidth().height(randomPanelHeight), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 RandomArtistPanel(state.randomArtists.firstOrNull(), state.randomArtistStats, catalogRefreshing, onArtist, onRefreshArtists, onPrefetchArtist, Modifier.weight(1f).fillMaxHeight(), panelStyle = panelStyle)
                 RandomAlbumPanel(state.randomAlbums.firstOrNull(), state.randomAlbumStats, catalogRefreshing, albumArtworkFallbacks, onAlbum, onRefreshAlbums, onPrefetchAlbum, Modifier.weight(1f).fillMaxHeight(), panelStyle = panelStyle)
@@ -2896,6 +2897,7 @@ private enum class HomePanelStyle {
 private fun HomePanel(
     modifier: Modifier = Modifier,
     style: HomePanelStyle = HomePanelStyle.Card,
+    contentPadding: PaddingValues = PaddingValues(12.dp),
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(8.dp)
@@ -2904,12 +2906,12 @@ private fun HomePanel(
             .clip(shape)
             .background(PhoebeUi.panel)
             .border(BorderStroke(1.dp, PhoebeUi.border), shape)
-            .padding(14.dp)
+            .padding(contentPadding)
         HomePanelStyle.Bare -> modifier
     }
     Column(
         panelModifier,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
         content = content,
     )
 }
@@ -3521,6 +3523,7 @@ private fun RandomArtistPanel(
     onPrefetch: (Artist) -> Unit,
     modifier: Modifier = Modifier,
     panelStyle: HomePanelStyle = HomePanelStyle.Card,
+    fillHeight: Boolean = true,
 ) {
     val homeTracksReady = LocalHomeTrackSectionsReady.current
     LaunchedEffect(artist?.id, homeTracksReady) {
@@ -3532,7 +3535,7 @@ private fun RandomArtistPanel(
         if (artist == null) {
             HomeEmptyState("Add music to your library to discover artists here.")
         } else {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Box(Modifier.then(if (fillHeight) Modifier.weight(1f) else Modifier).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 FeaturedArtistCard(
                     artist = artist,
                     stats = stats?.takeIf { it.artistId == artist.id },
@@ -3556,6 +3559,7 @@ private fun RandomAlbumPanel(
     onPrefetch: (Album) -> Unit,
     modifier: Modifier = Modifier,
     panelStyle: HomePanelStyle = HomePanelStyle.Card,
+    fillHeight: Boolean = true,
 ) {
     val homeTracksReady = LocalHomeTrackSectionsReady.current
     LaunchedEffect(album?.id, homeTracksReady) {
@@ -3567,7 +3571,7 @@ private fun RandomAlbumPanel(
         if (album == null) {
             HomeEmptyState("Add music to your library to discover albums here.")
         } else {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Box(Modifier.then(if (fillHeight) Modifier.weight(1f) else Modifier).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 FeaturedAlbumCard(
                     album = album,
                     stats = stats?.takeIf { it.albumId == album.id },
@@ -3598,7 +3602,7 @@ private fun RandomPanelHeader(
         }
         Box(
             Modifier
-                .size(34.dp)
+                .size(30.dp)
                 .clip(CircleShape)
                 .clickable(onClick = onRefresh)
                 .background(PhoebeUi.subtleFill)
@@ -3629,18 +3633,18 @@ private fun FeaturedArtistCard(
     val listenersLabel = remember(stats?.lastPlayedMs, nowMs) {
         stats?.lastPlayedMs?.let { formatLastPlayed(it, nowMs) } ?: "New"
     }
-    val artworkSize = 96.dp
+    val artworkSize = 80.dp
     Column(
         modifier
             .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             ArtworkImage(
                 artist.title,
@@ -3703,7 +3707,7 @@ private fun RandomExploreButton(
     Box(
         Modifier
             .fillMaxWidth()
-            .height(48.dp)
+            .height(40.dp)
             .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .background(PhoebeUi.elevatedFill)
@@ -3811,18 +3815,18 @@ private fun FeaturedAlbumCard(
         modifier
             .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             ArtworkImage(
                 album.title,
                 album.thumbUrl,
-                Modifier.size(96.dp).sharedArtworkTransition("album:${album.id}"),
+                Modifier.size(80.dp).sharedArtworkTransition("album:${album.id}"),
                 radius = 10.dp,
                 elevated = false,
                 fallbackThumbUrl = fallbackThumbUrl,
@@ -3914,7 +3918,7 @@ private fun SectionHeader(title: String, action: String?, onAction: () -> Unit) 
                 action,
                 color = PhoebeUi.secondaryText,
                 fontSize = 11.sp,
-                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onAction).padding(horizontal = 16.dp, vertical = 10.dp),
+                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onAction).padding(horizontal = 8.dp, vertical = 6.dp),
             )
         }
     }

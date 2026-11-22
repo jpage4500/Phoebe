@@ -57,6 +57,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
@@ -96,6 +97,7 @@ import com.phoebe.app.platform.isDesktopPlatform
 import com.phoebe.app.platform.openExternalUrl
 import com.phoebe.app.platform.rememberPickDownloadDirectory
 import com.phoebe.app.ui.HomeScreenLayoutMode
+import com.phoebe.app.ui.LibraryGridWidthTracker
 import com.phoebe.app.ui.LocalNowMs
 import com.phoebe.app.ui.PhoebeDesignSystem
 import com.phoebe.app.ui.PhoebeIcon
@@ -104,7 +106,9 @@ import com.phoebe.app.ui.PhoebeTintOption
 import com.phoebe.app.ui.PhoebeUi
 import com.phoebe.app.ui.PlatformBackHandler
 import com.phoebe.app.ui.SectionLabel
+import com.phoebe.app.ui.bucketedLibraryGridWidth
 import com.phoebe.app.ui.formatLastPlayed
+import com.phoebe.app.ui.libraryAdaptiveColumnCount
 import com.phoebe.app.remote.RemoteConnectionStatus
 import com.phoebe.app.updates.AppUpdateState
 import kotlinx.coroutines.delay
@@ -2148,6 +2152,15 @@ private fun LibraryGridSizeSettingsCard(
     onArtistGridItemSize: (Int) -> Unit,
     compact: Boolean = false,
 ) {
+    val windowWidth = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() }
+    // Prefer the library grid's real width; on mobile the library spans the window, so that's a
+    // good stand-in before the library has been opened. Desktop panes vary, so show nothing there.
+    val gridWidth = LibraryGridWidthTracker.lastWidth ?: windowWidth.takeIf { compact && it > 0.dp }
+    fun sizeLabel(sizeDp: Int): String {
+        val width = gridWidth ?: return " dp"
+        val columns = libraryAdaptiveColumnCount(bucketedLibraryGridWidth(width), sizeDp)
+        return " dp · $columns ${if (columns == 1) "column" else "columns"}"
+    }
     SettingsCard {
         Text("Library grid", color = PhoebeUi.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Text(
@@ -2160,7 +2173,7 @@ private fun LibraryGridSizeSettingsCard(
             label = "Albums",
             value = albumGridItemSizeDp,
             range = LibraryUiPreferences.MinAlbumGridItemSizeDp..LibraryUiPreferences.MaxAlbumGridItemSizeDp,
-            suffix = " dp",
+            suffix = sizeLabel(albumGridItemSizeDp),
             compact = compact,
             onValue = onAlbumGridItemSize,
         )
@@ -2168,7 +2181,7 @@ private fun LibraryGridSizeSettingsCard(
             label = "Artists",
             value = artistGridItemSizeDp,
             range = LibraryUiPreferences.MinArtistGridItemSizeDp..LibraryUiPreferences.MaxArtistGridItemSizeDp,
-            suffix = " dp",
+            suffix = sizeLabel(artistGridItemSizeDp),
             compact = compact,
             onValue = onArtistGridItemSize,
         )

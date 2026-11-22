@@ -1395,33 +1395,24 @@ private fun OrderMenuItem(
 }
 
 private const val LibraryGridWidthDebounceMs = 200L
-private const val LibraryGridWidthBucketDp = 64f
-
-fun libraryAdaptiveColumnCount(
-    availableWidth: Dp,
-    itemSizeDp: Int,
-    gap: Dp = 14.dp,
-): Int {
-    val itemWidth = itemSizeDp.dp
-    if (availableWidth <= 0.dp) return 1
-    return ((availableWidth + gap) / (itemWidth + gap)).toInt().coerceAtLeast(1)
-}
 
 @Composable
 fun rememberLibraryGridColumnCount(
     availableWidth: Dp,
     itemSizeDp: Int,
     horizontalSpacing: Dp,
+    onSettledWidth: ((Dp) -> Unit)? = null,
 ): Int {
     var settledWidth by remember { mutableStateOf(availableWidth) }
     LaunchedEffect(availableWidth) {
         delay(LibraryGridWidthDebounceMs)
         settledWidth = availableWidth
+        onSettledWidth?.invoke(availableWidth)
     }
-    val widthBucket = (settledWidth.value / LibraryGridWidthBucketDp).roundToInt().coerceAtLeast(1)
-    return remember(widthBucket, itemSizeDp, horizontalSpacing) {
+    val bucketedWidth = bucketedLibraryGridWidth(settledWidth)
+    return remember(bucketedWidth, itemSizeDp, horizontalSpacing) {
         libraryAdaptiveColumnCount(
-            availableWidth = (widthBucket * LibraryGridWidthBucketDp).dp,
+            availableWidth = bucketedWidth,
             itemSizeDp = itemSizeDp,
             gap = horizontalSpacing,
         )
@@ -1443,6 +1434,7 @@ fun LibraryResponsiveGrid(
             availableWidth = maxWidth,
             itemSizeDp = itemSizeDp,
             horizontalSpacing = horizontalSpacing,
+            onSettledWidth = { LibraryGridWidthTracker.lastWidth = it },
         )
         LazyVerticalGrid(
             columns = GridCells.Fixed(columnCount),
@@ -1716,8 +1708,8 @@ private fun ArtistsContent(
             Box(modifier) {
                 LibraryResponsiveGrid(
                     itemSizeDp = artistGridItemSizeDp,
-                    horizontalSpacing = 18.dp,
-                    verticalSpacing = 20.dp,
+                    horizontalSpacing = 14.dp,
+                    verticalSpacing = 12.dp,
                     state = gridState,
                     modifier = Modifier.fillMaxSize(),
                 ) {
@@ -1834,8 +1826,8 @@ private fun ArtistCard(
         Modifier
             .clip(RoundedCornerShape(14.dp))
             .phoebeClickable(onClick = onArtist)
-            .padding(horizontal = 10.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(horizontal = 6.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
@@ -2049,8 +2041,8 @@ private fun AlbumsGrid(
             Box(modifier) {
                 LibraryResponsiveGrid(
                     itemSizeDp = albumGridItemSizeDp,
-                    horizontalSpacing = 18.dp,
-                    verticalSpacing = 20.dp,
+                    horizontalSpacing = 14.dp,
+                    verticalSpacing = 12.dp,
                     state = gridState,
                     modifier = Modifier.fillMaxSize(),
                 ) {
@@ -2172,7 +2164,7 @@ private fun AlbumCard(
             .phoebeClickable(onClick = onSelect)
             .padding(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box(
             Modifier

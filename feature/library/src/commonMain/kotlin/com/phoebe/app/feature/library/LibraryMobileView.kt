@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -547,8 +548,8 @@ private fun MobileArtistsContent(
             Box(Modifier.fillMaxSize()) {
                 LibraryResponsiveGrid(
                     itemSizeDp = artistGridItemSizeDp,
-                    horizontalSpacing = 14.dp,
-                    verticalSpacing = 16.dp,
+                    horizontalSpacing = LibraryGridHorizontalSpacing,
+                    verticalSpacing = 8.dp,
                     state = gridState,
                     contentPadding = contentPadding,
                     modifier = Modifier.fillMaxSize(),
@@ -684,8 +685,8 @@ private fun MobileArtistCard(
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         ArtworkImage(
@@ -701,22 +702,26 @@ private fun MobileArtistCard(
             elevated = false,
             maxDecodeDimension = artworkDecodeDimension,
         )
-        Text(
-            artist.title,
-            color = PhoebeUi.primaryText,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
-        )
-        Text(
-            subtitle,
-            color = PhoebeUi.mutedText,
-            fontSize = 11.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                artist.title,
+                color = PhoebeUi.primaryText,
+                fontSize = 13.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition("artist:${artist.id}:title"),
+            )
+            Text(
+                subtitle,
+                color = PhoebeUi.mutedText,
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -822,8 +827,8 @@ private fun MobileAlbumsContent(
             Box(Modifier.fillMaxSize()) {
                 LibraryResponsiveGrid(
                     itemSizeDp = albumGridItemSizeDp,
-                    horizontalSpacing = 14.dp,
-                    verticalSpacing = 16.dp,
+                    horizontalSpacing = LibraryGridHorizontalSpacing,
+                    verticalSpacing = 8.dp,
                     state = gridState,
                     contentPadding = contentPadding,
                     modifier = Modifier.fillMaxSize(),
@@ -977,9 +982,9 @@ private fun MobileAlbumCard(
         Modifier
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .padding(6.dp),
+            .padding(4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(
             Modifier
@@ -996,34 +1001,40 @@ private fun MobileAlbumCard(
                 maxDecodeDimension = artworkDecodeDimension,
             )
         }
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(horizontal = 2.dp)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
             Text(
                 album.title,
                 color = PhoebeUi.primaryText,
                 fontSize = 13.sp,
+                lineHeight = 16.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.sharedBoundsTransition("album:${album.id}:title"),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().sharedBoundsTransition("album:${album.id}:title"),
             )
             Text(
                 album.artist,
                 color = PhoebeUi.secondaryText,
                 fontSize = 11.sp,
+                lineHeight = 14.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.sharedBoundsTransition("album:${album.id}:subtitle"),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().sharedBoundsTransition("album:${album.id}:subtitle"),
             )
             Text(
-                buildString {
-                    album.year?.let { append(it.toString()) }
-                    if (length > 0) append(" • ")
-                    if (durationMs > 0L) append(formatMinutesLabel(durationMs))
-                },
+                listOfNotNull(
+                    album.year?.toString(),
+                    durationMs.takeIf { it > 0L }?.let(::formatMinutesLabel),
+                ).joinToString(" • "),
                 color = PhoebeUi.mutedText,
                 fontSize = 10.sp,
+                lineHeight = 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
     }
