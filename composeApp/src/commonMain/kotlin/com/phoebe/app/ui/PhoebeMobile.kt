@@ -283,9 +283,6 @@ internal fun MobileBrowseShell(
     onRecentSongs: () -> Unit,
     onRecentArtists: () -> Unit,
     onRecentAlbums: () -> Unit,
-    onFavoritePlaylists: () -> Unit,
-    onFavoriteArtists: () -> Unit,
-    onFavoriteAlbums: () -> Unit,
     onRecentlyPlayed: () -> Unit,
     onMostPlayed: () -> Unit,
     onCollections: (CollectionEntry) -> Unit,
@@ -435,6 +432,21 @@ internal fun MobileBrowseShell(
     }
     var libraryFavoritesOnly by rememberSaveable { mutableStateOf(false) }
     var playlistsFavoritesOnly by rememberSaveable { mutableStateOf(false) }
+    // Home's favorites "View all" opens the matching browse tab with its favorites filter on.
+    val onFavoritePlaylists: () -> Unit = {
+        playlistsFavoritesOnly = true
+        onNavigate(BrowseSection.Playlists)
+    }
+    val onFavoriteArtists: () -> Unit = {
+        libraryFavoritesOnly = true
+        onLibraryFilter(LibraryFilterTab.Artists)
+        onNavigate(BrowseSection.Library)
+    }
+    val onFavoriteAlbums: () -> Unit = {
+        libraryFavoritesOnly = true
+        onLibraryFilter(LibraryFilterTab.Albums)
+        onNavigate(BrowseSection.Library)
+    }
     // The query itself resets on section change upstream; the expanded field should too.
     var toolbarSearchExpanded by remember(section, selectedPlaylistId) { mutableStateOf(false) }
     val mobileLibraryViewMode = libraryUi.resolvedViewMode()
