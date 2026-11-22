@@ -1015,8 +1015,14 @@ class CatalogRepository(
                 replaceRemoteShell = currentSession.isPlex(),
             )
             if (merged != mutableCatalog.value) {
+                val previous = mutableCatalog.value
                 mutableCatalog.value = merged
                 enqueueCatalogDbWrite { persistCatalogShell(merged) }
+                // The shell write skips track lists; persist a replaced Liked Songs list so stale entries
+                // don't come back from the database on the next launch.
+                merged.playlists
+                    .filter { it.isLikedSongsPlaylist() && merged.tracksByParent[it.id] != previous.tracksByParent[it.id] }
+                    .forEach { persistPlaylistTracksAsync(merged, it.id) }
             }
         }
     }
@@ -1118,8 +1124,28 @@ class CatalogRepository(
             )
         }
         return merged
+            .withServerLikedSongsFrom(prefixed, previous)
             .withRemoteArtworkFrom(previous)
             .withPlaylistUserStateFrom(previous)
+    }
+
+    /**
+     * The shell's Liked Songs list is the server's full starred list, so it replaces the cached one rather
+     * than being unioned into it. Unioning kept entries the server had dropped: songs unstarred elsewhere,
+     * and Octo's streamed (not-in-library) entry after it downloads the song and moves the star to the new
+     * library ID — which showed every downloaded favorite twice in Liked Songs and Library.
+     */
+    private fun CatalogSnapshot.withServerLikedSongsFrom(
+        shell: CatalogSnapshot,
+        previous: CatalogSnapshot,
+    ): CatalogSnapshot {
+        val likedIds = shell.playlists.filter { it.isLikedSongsPlaylist() }.map { it.id }
+        val replacements = likedIds.mapNotNull { id ->
+            val incoming = shell.tracksByParent[id] ?: return@mapNotNull null
+            id to preserveTrackDateAdded(previous.tracksByParent[id].orEmpty(), incoming)
+        }
+        if (replacements.isEmpty()) return this
+        return copy(tracksByParent = tracksByParent + replacements)
     }
 
     private fun CatalogSnapshot.withRemoteArtworkFrom(source: CatalogSnapshot): CatalogSnapshot {
@@ -4913,6 +4939,18 @@ class CatalogRepository(
         )
         if (tracks.isNotEmpty()) publishIndexedProviderTracks("navidrome", tracks)
         return tracks.map { it.withProviderPrefix("navidrome") }
+    }
+
+    /**
+     * Server-side song search for Subsonic servers (Navidrome / Octo). Results are returned only — never
+     * merged into the catalog — because Octo includes songs that aren't in the library yet.
+     */
+    suspend fun navidromeServerSearchTracks(session: PlexSession?, query: String): List<Track> {
+        val navidromeSession = session?.takeIf { it.isNavidrome() } ?: return emptyList()
+        val server = navidromeSession.selectedServer ?: return emptyList()
+        val password = navidromeSession.token.takeIf { it.isNotBlank() } ?: return emptyList()
+        return subsonicClient.searchSongs(server, navidromeSession.userName, password, query)
+            .map { it.withProviderPrefix("navidrome") }
     }
 
     /** Server-picked similar songs for an artist, album, or song ID (Navidrome `getSimilarSongs`). */

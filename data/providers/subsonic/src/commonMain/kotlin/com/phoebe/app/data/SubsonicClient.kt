@@ -500,6 +500,22 @@ class SubsonicClient(
         return response.response.randomSongs?.song.orEmpty().map { it.toTrack(server.uri, username, password) }
     }
 
+    /**
+     * Server-side song search via `search3`. Octo treats `songCount` of 12 or fewer as search-as-you-type
+     * and answers from the library only, so ask for more to get songs that aren't in the library yet
+     * (those come back flagged `isExternal`). Returned tracks carry bare (unprefixed) server IDs.
+     */
+    suspend fun searchSongs(server: PlexServer, username: String, password: String, query: String, count: Int = ServerSearchSongCount): List<Track> {
+        val trimmed = query.trim().takeIf { it.isNotBlank() } ?: return emptyList()
+        val response = request<SubsonicSearchResult3Root>(server.uri, username, password, "search3") {
+            parameter("query", trimmed)
+            parameter("songCount", count)
+            parameter("albumCount", 0)
+            parameter("artistCount", 0)
+        }
+        return response.response.searchResult3?.song.orEmpty().map { it.toTrack(server.uri, username, password) }
+    }
+
     /** Resolves a server artist ID from a display name via `search3`; exact (case-insensitive) matches only. */
     suspend fun findArtistIdByName(server: PlexServer, username: String, password: String, name: String): String? {
         val query = name.trim().takeIf { it.isNotBlank() } ?: return null
@@ -663,6 +679,8 @@ class SubsonicClient(
         const val SubsonicClientName = "phoebe"
         const val SubsonicPageSize = 500
         const val ArtistRadioTrackCount = 50
+        /** Must stay above 12: Octo answers library-only for search-as-you-type sized requests. */
+        const val ServerSearchSongCount = 20
         const val ArtistRadioMinSimilarTracks = 10
         const val ArtistRadioMaxSeedAlbums = 8
         const val ArtistInfoSimilarCount = 20
@@ -828,6 +846,7 @@ private data class SubsonicResponse(
 @Serializable
 private data class SubsonicSearchResult3(
     val artist: List<SubsonicArtistDto> = emptyList(),
+    val song: List<SubsonicSongDto> = emptyList(),
 )
 
 @Serializable
@@ -940,6 +959,8 @@ private data class SubsonicSongDto(
     val played: String? = null,
     /** OpenSubsonic extension (Navidrome and others). */
     val replayGain: SubsonicReplayGainDto? = null,
+    /** Octo extension: the song is streamable but not in the library yet. */
+    val isExternal: Boolean? = null,
 )
 
 @Serializable
@@ -1058,6 +1079,7 @@ private fun SubsonicSongDto.toTrack(baseUrl: String, username: String, password:
         replayGainTrackPeak = replayGain?.trackPeak?.takeIf { it > 0f },
         replayGainAlbumGainDb = replayGain?.albumGain,
         replayGainAlbumPeak = replayGain?.albumPeak?.takeIf { it > 0f },
+        isExternal = isExternal == true,
     )
 
 private fun String.parseSubsonicTimestampMillis(): Long? {

@@ -30,6 +30,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
@@ -56,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.delay
 import com.phoebe.app.data.artistAlbumCountSubtitle
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.Artist
@@ -71,6 +73,8 @@ import com.phoebe.app.domain.filterWith
 import com.phoebe.app.domain.parseAdvancedSearchQuery
 import com.phoebe.app.ui.ArtworkImage
 import com.phoebe.app.ui.AutoScrollingText
+import com.phoebe.app.ui.LikeButton
+import com.phoebe.app.ui.LocalLikeActions
 import com.phoebe.app.ui.LocalMobileChromePadding
 import com.phoebe.app.ui.PhoebeIcon
 import com.phoebe.app.ui.PhoebeIconView
@@ -91,6 +95,8 @@ data class SearchUiResults(
     val topArtist: Artist?,
     val topAlbum: Album?,
     val topTrack: Track?,
+    /** A server-side search for the current query is pending (debounce or request in flight). */
+    val serverSearching: Boolean = false,
 )
 
 internal enum class SearchResultScope {
@@ -101,6 +107,69 @@ internal enum class SearchResultScope {
 }
 
 private const val SearchResultLimit = 500
+private const val ServerSearchDebounceMs = 350L
+private const val ServerSearchMinQueryLength = 2
+
+internal data class ServerSearchState(
+    val tracks: List<Track> = emptyList(),
+    val searching: Boolean = false,
+)
+
+/**
+ * Debounced server-side song search for the current query. Advanced filter queries stay local-only.
+ * Previous results are kept while a new request is in flight to avoid flicker while typing.
+ */
+@Composable
+internal fun rememberServerSearch(searchQuery: String): ServerSearchState {
+    val serverSearch = LocalServerSearch.current
+    val query = searchQuery.trim()
+    var state by remember { mutableStateOf(ServerSearchState()) }
+    LaunchedEffect(serverSearch.enabled, serverSearch.searchTracks, query) {
+        if (!serverSearch.enabled ||
+            query.length < ServerSearchMinQueryLength ||
+            parseAdvancedSearchQuery(query).filter.rules.isNotEmpty()
+        ) {
+            state = ServerSearchState()
+            return@LaunchedEffect
+        }
+        // No finally-reset: a cancelled (superseded) search must not clear the newer search's flag.
+        state = state.copy(searching = true)
+        delay(ServerSearchDebounceMs)
+        state = ServerSearchState(tracks = serverSearch.searchTracks(query), searching = false)
+    }
+    return state
+}
+
+/**
+ * Appends server hits the local search didn't already return (e.g. Octo songs not in the library yet).
+ * Dedupe is against the local results only, not the whole catalog: hearting an external song adds it to
+ * Liked Songs, and the server may match queries the local substring search doesn't, so a catalog-wide
+ * dedupe would make the song vanish from the results right after it's hearted.
+ */
+@Composable
+internal fun rememberMergedSearchResults(
+    searchQuery: String,
+    localResults: SearchUiResults,
+    serverSearch: ServerSearchState,
+): SearchUiResults = remember(searchQuery, localResults, serverSearch) {
+    localResults.withServerTracks(serverSearch.tracks, searchQuery).copy(serverSearching = serverSearch.searching)
+}
+
+internal fun SearchUiResults.withServerTracks(serverTracks: List<Track>, query: String): SearchUiResults {
+    if (serverTracks.isEmpty()) return this
+    // Hearting an external song adds it to Liked Songs, so the local search starts matching it too.
+    // Keep such songs at their server position instead of letting them jump into the local block.
+    val externalServerIds = serverTracks.filter { it.isExternal }.mapTo(HashSet()) { it.id }
+    val localTracks = tracks.filterNot { it.id in externalServerIds }
+    val knownIds = localTracks.mapTo(HashSet()) { it.id }
+    val extras = serverTracks.filter { knownIds.add(it.id) }
+    if (extras.isEmpty() && localTracks.size == tracks.size) return this
+    val localTopTrack = if (localTracks.size == tracks.size) topTrack else bestSearchMatch(localTracks, query.trim()) { it.title }
+    return copy(
+        tracks = localTracks + extras,
+        topTrack = localTopTrack ?: extras.firstOrNull(),
+    )
+}
 
 @Composable
 internal fun rememberSearchUiResults(catalog: CatalogSnapshot, searchQuery: String): SearchUiResults {
@@ -419,7 +488,11 @@ fun SearchDesktopView(
     },
     topBar: (@Composable () -> Unit)? = null,
 ) {
-    val results = rememberSearchUiResults(catalog, searchQuery)
+    val results = rememberMergedSearchResults(
+        searchQuery = searchQuery,
+        localResults = rememberSearchUiResults(catalog, searchQuery),
+        serverSearch = rememberServerSearch(searchQuery),
+    )
     val searchHistory = LocalSearchHistory.current
     val hasQuery = searchQuery.isNotBlank()
     var resultScope by remember { mutableStateOf(SearchResultScope.Overview) }
@@ -503,6 +576,7 @@ fun SearchDesktopView(
                 SearchSongsSection(
                     tracks = results.tracks.take(5),
                     allTracks = results.tracks,
+                    serverSearching = results.serverSearching,
                     compact = compactPane,
                     onSeeAll = if (results.tracks.size > 5) {
                         { resultScope = SearchResultScope.Songs }
@@ -605,7 +679,11 @@ fun SearchMobileView(
     },
     topBar: (@Composable () -> Unit)? = null,
 ) {
-    val results = rememberSearchUiResults(catalog, searchQuery)
+    val results = rememberMergedSearchResults(
+        searchQuery = searchQuery,
+        localResults = rememberSearchUiResults(catalog, searchQuery),
+        serverSearch = rememberServerSearch(searchQuery),
+    )
     val searchHistory = LocalSearchHistory.current
     val hasQuery = searchQuery.isNotBlank()
     var resultScope by remember { mutableStateOf(SearchResultScope.Overview) }
@@ -678,6 +756,7 @@ fun SearchMobileView(
                 SearchSongsSection(
                     tracks = results.tracks.take(5),
                     allTracks = results.tracks,
+                    serverSearching = results.serverSearching,
                     compact = true,
                     onSeeAll = if (results.tracks.size > 5) {
                         { resultScope = SearchResultScope.Songs }
@@ -831,11 +910,18 @@ internal fun SearchTopTrackCard(
                 Text(track.title, color = PhoebeUi.primaryText, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = if (compact) 11.sp else 14.sp)
-            Text("Song • ${formatDuration(track.durationMs)}", color = PhoebeUi.mutedText, fontSize = if (compact) 11.sp else 12.sp)
+            Text(
+                searchDurationLabel(track)?.let { "Song • $it" } ?: "Song",
+                color = PhoebeUi.mutedText,
+                fontSize = if (compact) 11.sp else 12.sp,
+            )
+            // Own line: the text column is narrow next to the heart/play/more buttons on compact cards.
+            if (track.isExternal) ExternalTrackBadge()
             if (!compact) {
                 SearchPlayChip(enabled = true) { onPlayTracks(tracks, 0) }
             }
         }
+        if (track.isExternal) ExternalTrackLikeButton(track)
         if (compact) {
             SearchRoundPlayButton(enabled = true) { onPlayTracks(tracks, 0) }
             PhoebeIconView(PhoebeIcon.More, tint = PhoebeUi.mutedText, modifier = Modifier.size(20.dp))
@@ -903,6 +989,7 @@ internal fun SearchAllResultsPanel(
             SearchResultScope.Songs -> SearchSongsSection(
                 tracks = results.tracks,
                 allTracks = results.tracks,
+                serverSearching = results.serverSearching,
                 compact = compact,
                 onPlayTracks = onPlayTracks,
                 onAddToUpNext = onAddToUpNext,
@@ -951,6 +1038,7 @@ internal fun SearchSongsSection(
     tracks: List<Track>,
     allTracks: List<Track>,
     compact: Boolean,
+    serverSearching: Boolean = false,
     onSeeAll: (() -> Unit)? = null,
     onPlayTracks: (List<Track>, Int) -> Unit,
     onAddToUpNext: (Track) -> Unit,
@@ -964,9 +1052,9 @@ internal fun SearchSongsSection(
     ) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SearchSectionHeader("Songs", showSeeAll = onSeeAll != null, onSeeAll = onSeeAll)
+        SearchSectionHeader("Songs", showSeeAll = onSeeAll != null, onSeeAll = onSeeAll, loading = serverSearching)
         if (tracks.isEmpty()) {
-            SearchEmptyCard("No songs found.")
+            SearchEmptyCard(if (serverSearching) "Searching server…" else "No songs found.")
         } else {
             if (!compact) {
                 SearchSongsHeader()
@@ -1033,9 +1121,13 @@ internal fun SearchSongResultRow(
             TrackArtworkImage(track, Modifier.size(38.dp), radius = 7.dp)
             Column(Modifier.weight(1f)) {
                 AutoScrollingText(track.title, color = if (index == 0) PhoebeUi.accentLight else PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 10.sp)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (track.isExternal) ExternalTrackBadge()
+                    AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 10.sp, modifier = Modifier.weight(1f))
+                }
             }
-            Text(formatDuration(track.durationMs), color = PhoebeUi.mutedText, fontSize = 10.sp)
+            searchDurationLabel(track)?.let { Text(it, color = PhoebeUi.mutedText, fontSize = 10.sp) }
+            if (track.isExternal) ExternalTrackLikeButton(track)
             SearchOverflowMenu(
                 track = track,
                 expanded = menuExpanded,
@@ -1060,10 +1152,14 @@ internal fun SearchSongResultRow(
         ) {
             Text((index + 1).toString(), color = PhoebeUi.mutedText, fontSize = 11.sp, modifier = Modifier.width(18.dp))
             TrackArtworkImage(track, Modifier.size(24.dp), radius = 5.dp)
-            AutoScrollingText(track.title, color = if (index == 0) PhoebeUi.accentLight else PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1.25f))
+            Row(Modifier.weight(1.25f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                AutoScrollingText(track.title, color = if (index == 0) PhoebeUi.accentLight else PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f, fill = false))
+                if (track.isExternal) ExternalTrackBadge()
+            }
             AutoScrollingText(track.artist, color = PhoebeUi.secondaryText, fontSize = 11.sp, modifier = Modifier.weight(0.95f))
             AutoScrollingText(track.album, color = PhoebeUi.secondaryText, fontSize = 11.sp, modifier = Modifier.weight(0.95f))
-            Text(formatDuration(track.durationMs), color = PhoebeUi.mutedText, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.width(66.dp))
+            Text(searchDurationLabel(track).orEmpty(), color = PhoebeUi.mutedText, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.width(66.dp))
+            if (track.isExternal) ExternalTrackLikeButton(track)
             SearchOverflowMenu(
                 track = track,
                 expanded = menuExpanded,
@@ -1355,10 +1451,58 @@ private fun RecentSearchRemoveButton(onRemove: () -> Unit) {
     }
 }
 
+/** Null when the server didn't report a length (common for Octo songs not in the library yet). */
+internal fun searchDurationLabel(track: Track): String? =
+    track.durationMs.takeIf { it > 0 }?.let(::formatDuration)
+
+/** Marks a server search hit that isn't in the library yet (Octo `isExternal`). */
 @Composable
-internal fun SearchSectionHeader(label: String, showSeeAll: Boolean, onSeeAll: (() -> Unit)? = null) {
+internal fun ExternalTrackBadge() {
+    Text(
+        "Not in library",
+        color = PhoebeUi.accentLight,
+        fontSize = 9.sp,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        softWrap = false,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .border(BorderStroke(1.dp, PhoebeUi.accentLight.copy(alpha = 0.45f)), RoundedCornerShape(999.dp))
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    )
+}
+
+/** Hearting an external song stars it on the server, which makes Octo download it into the library. */
+@Composable
+internal fun ExternalTrackLikeButton(track: Track) {
+    val likeActions = LocalLikeActions.current
+    LikeButton(
+        liked = likeActions.isLiked(track),
+        enabled = likeActions.likesEnabled,
+        onClick = { likeActions.onToggleLiked(track) },
+        modifier = Modifier.semantics { contentDescription = "Add to library" },
+    )
+}
+
+@Composable
+internal fun SearchSectionHeader(
+    label: String,
+    showSeeAll: Boolean,
+    onSeeAll: (() -> Unit)? = null,
+    loading: Boolean = false,
+) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         SectionLabel(label, PhoebeUi.primaryText)
+        if (loading) {
+            Spacer(Modifier.width(10.dp))
+            CircularProgressIndicator(
+                modifier = Modifier.size(12.dp).semantics { contentDescription = "Searching server" },
+                strokeWidth = 1.5.dp,
+                color = PhoebeUi.accentLight,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text("Searching server…", color = PhoebeUi.mutedText, fontSize = 10.sp, maxLines = 1)
+        }
         Spacer(Modifier.weight(1f))
         if (showSeeAll) {
             Text(

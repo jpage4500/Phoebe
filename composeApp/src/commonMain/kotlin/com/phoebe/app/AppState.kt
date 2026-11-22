@@ -4378,6 +4378,18 @@ class AppState(
         result.message?.let { mutableMessage.value = it }
     }
 
+    fun supportsServerSearch(): Boolean = session.value.isNavidrome()
+
+    suspend fun serverSearchTracks(query: String): List<Track> =
+        try {
+            dependencies.catalogRepository.navidromeServerSearchTracks(session.value, query)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            PhoebeLog.d("AppState") { "server search failed: ${error.message}" }
+            emptyList()
+        }
+
     fun toggleLikedTrack(track: Track) = scope.launch {
         if (!track.canTogglePlexLike()) {
             mutableMessage.value = "Liked Songs syncs streaming library songs only."

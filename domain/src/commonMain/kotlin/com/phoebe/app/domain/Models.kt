@@ -559,6 +559,8 @@ data class Track(
      * connection used at catalog time is no longer reachable. Ephemeral; not persisted.
      */
     val playbackFallbackUrls: List<String> = emptyList(),
+    /** Streamable from the server but not in the user's library yet (Octo `isExternal`). */
+    val isExternal: Boolean = false,
 )
 
 fun List<Track>.mergeDownloadCopiesById(): List<Track> {

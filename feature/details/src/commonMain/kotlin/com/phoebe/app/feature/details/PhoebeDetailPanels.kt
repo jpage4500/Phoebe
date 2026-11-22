@@ -1203,12 +1203,14 @@ private fun MobileArtistDetailHeader(
                 MobileDetailIconSurface {
                     DownloadActionButton("Download", tracks, iconOnly = true) { onDownloadArtist(artist) }
                 }
-                MobileDetailIconSurface {
-                    LikeButton(
-                        liked = favoriteActions.isFavorite(artist),
-                        enabled = true,
-                        onClick = { favoriteActions.onToggleArtist(artist) },
-                    )
+                if (favoriteActions.canFavorite(artist)) {
+                    MobileDetailIconSurface {
+                        LikeButton(
+                            liked = favoriteActions.isFavorite(artist),
+                            enabled = true,
+                            onClick = { favoriteActions.onToggleArtist(artist) },
+                        )
+                    }
                 }
             }
         }
@@ -1606,12 +1608,14 @@ private fun DesktopArtistDetailHeader(
             }
             DesktopDetailMetaLink("Stats", onStatsClick)
             DownloadActionButton("Download", tracks) { onDownloadArtist(artist) }
-            DesktopDetailIconSurface {
-                LikeButton(
-                    liked = favoriteActions.isFavorite(artist),
-                    enabled = true,
-                    onClick = { favoriteActions.onToggleArtist(artist) },
-                )
+            if (favoriteActions.canFavorite(artist)) {
+                DesktopDetailIconSurface {
+                    LikeButton(
+                        liked = favoriteActions.isFavorite(artist),
+                        enabled = true,
+                        onClick = { favoriteActions.onToggleArtist(artist) },
+                    )
+                }
             }
         },
     )

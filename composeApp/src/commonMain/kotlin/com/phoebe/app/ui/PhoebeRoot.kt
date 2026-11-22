@@ -226,6 +226,8 @@ import com.phoebe.app.feature.playback.VisualizerPresetSentinel
 import com.phoebe.app.feature.playback.VisualizerSentinelBridge
 import com.phoebe.app.feature.search.LocalSearchHistory
 import com.phoebe.app.feature.search.LocalSavedSearchActions
+import com.phoebe.app.feature.search.LocalServerSearch
+import com.phoebe.app.feature.search.ServerSearchActions
 import com.phoebe.app.feature.search.SavedSearchActions
 import com.phoebe.app.feature.search.rememberSearchHistoryState
 import com.phoebe.app.feature.settings.DownloadManagerUiSummary
@@ -1403,6 +1405,12 @@ private fun PhoebeRootStateHolder(
         )
     }
     val dragDrop = remember { DragDropController() }
+    val serverSearch = remember(state, sessionKey, session?.providerType) {
+        ServerSearchActions(
+            enabled = state.supportsServerSearch(),
+            searchTracks = { query -> state.serverSearchTracks(query) },
+        )
+    }
 
     CompositionLocalProvider(
         LocalCatalogHasContent provides catalogHasContent,
@@ -1427,6 +1435,7 @@ private fun PhoebeRootStateHolder(
         LocalDragDrop provides dragDrop,
         LocalSearchHistory provides searchHistory,
         LocalSavedSearchActions provides savedSearchActions,
+        LocalServerSearch provides serverSearch,
         LocalVisualizerAudioAnalysis provides state.audioAnalysis,
     ) {
     if (showEventsDebugMenu && isDebugBuild()) {
