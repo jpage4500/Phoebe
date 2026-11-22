@@ -58,7 +58,7 @@ internal fun SmartPlaylistCreateButton(
 }
 
 @Composable
-internal fun SmartPlaylistTemplateDialog(
+fun SmartPlaylistTemplateDialog(
     catalog: CatalogSnapshot,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,

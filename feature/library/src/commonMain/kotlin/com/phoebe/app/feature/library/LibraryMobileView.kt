@@ -1627,10 +1627,6 @@ fun PlaylistsMobileView(
     val playlistActions = LocalPlaylistActions.current
     val favoriteActions = LocalFavoriteActions.current
     val playlists = playlistActions.playlists
-    var showSmartPlaylistDialog by remember { mutableStateOf(false) }
-    if (showSmartPlaylistDialog) {
-        SmartPlaylistTemplateDialog(catalog = catalog, onDismiss = { showSmartPlaylistDialog = false })
-    }
     var visiblePlaylistsResult by remember { mutableStateOf<List<Playlist>?>(null) }
     LaunchedEffect(playlists, searchQuery, favoritesOnly, favoriteActions.catalog) {
         visiblePlaylistsResult = withContext(Dispatchers.Default) {
@@ -1691,28 +1687,10 @@ fun PlaylistsMobileView(
                 }
             }
         } else {
-                item(contentType = "create") {
-                    MobilePlaylistRow(
-                        icon = PhoebeIcon.Plus,
-                        title = "Create Playlist",
-                        subtitle = null,
-                        accent = false,
-                        onClick = { playlistActions.onRequestCreatePlaylist(emptyList()) },
-                    )
-                }
-                item(contentType = "create-smart") {
-                    MobilePlaylistRow(
-                        icon = PhoebeIcon.InterwovenArrows,
-                        title = "Create Smart Playlist",
-                        subtitle = null,
-                        accent = true,
-                        onClick = { showSmartPlaylistDialog = true },
-                    )
-                }
                 if (playlists.isEmpty()) {
                     item(contentType = "empty") {
                         Text(
-                            "No playlists yet. Create one or add songs from your library.",
+                            "No playlists yet. Create one from the menu or add songs from your library.",
                             color = PhoebeUi.mutedText,
                             fontSize = 13.sp,
                             lineHeight = 18.sp,
@@ -1758,6 +1736,43 @@ fun PlaylistsMobileView(
     }
 }
 
+/**
+ * Overflow-menu entries for creating playlists on the mobile Playlists screen. The smart playlist
+ * picker is a dialog, so the caller owns its visibility (the menu is gone once an item is tapped).
+ */
+@Composable
+fun PlaylistCreateMenuItems(
+    onCreateSmartPlaylist: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val playlistActions = LocalPlaylistActions.current
+    if (!playlistActions.playlistsEnabled) return
+    DropdownMenuItem(
+        text = {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                PhoebeIconView(PhoebeIcon.Plus, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
+                Text("Create Playlist")
+            }
+        },
+        onClick = {
+            onDismiss()
+            playlistActions.onRequestCreatePlaylist(emptyList())
+        },
+    )
+    DropdownMenuItem(
+        text = {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                PhoebeIconView(PhoebeIcon.InterwovenArrows, tint = PhoebeUi.accentLight, modifier = Modifier.size(18.dp))
+                Text("Create Smart Playlist")
+            }
+        },
+        onClick = {
+            onDismiss()
+            onCreateSmartPlaylist()
+        },
+    )
+}
+
 @Composable
 fun MobilePlaylistRow(
     icon: PhoebeIcon?,
@@ -1775,7 +1790,7 @@ fun MobilePlaylistRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 4.dp, vertical = 10.dp),
+            .padding(horizontal = 4.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {

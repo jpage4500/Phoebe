@@ -36,9 +36,11 @@ import com.phoebe.app.feature.library.LibraryMobileRoute
 import com.phoebe.app.feature.library.LibraryRouteActions
 import com.phoebe.app.feature.library.LibraryRouteState
 import com.phoebe.app.feature.library.LibraryViewMode
+import com.phoebe.app.feature.library.PlaylistCreateMenuItems
 import com.phoebe.app.feature.library.PlaylistsMobileRoute
 import com.phoebe.app.feature.library.PlaylistsRouteActions
 import com.phoebe.app.feature.library.PlaylistsRouteState
+import com.phoebe.app.feature.library.SmartPlaylistTemplateDialog
 import com.phoebe.app.feature.library.resolvedViewMode
 import com.phoebe.app.feature.library.LibrarySectionIndexMode
 import com.phoebe.app.feature.radio.RadioRoute
@@ -430,6 +432,10 @@ internal fun MobileBrowseShell(
             },
         )
     }
+    var showSmartPlaylistDialog by remember { mutableStateOf(false) }
+    if (showSmartPlaylistDialog) {
+        SmartPlaylistTemplateDialog(catalog = catalog, onDismiss = { showSmartPlaylistDialog = false })
+    }
     var libraryFavoritesOnly by rememberSaveable { mutableStateOf(false) }
     var playlistsFavoritesOnly by rememberSaveable { mutableStateOf(false) }
     // Home's favorites "View all" opens the matching browse tab with its favorites filter on.
@@ -569,6 +575,12 @@ internal fun MobileBrowseShell(
                         libraryViewMode = mobileLibraryViewMode,
                         onLibraryViewMode = onLibraryViewMode,
                         onColumns = onLibraryColumns,
+                        onDismiss = { menuExpanded = false },
+                    )
+                }
+                if (section == BrowseSection.Playlists && selectedPlaylistId == null) {
+                    PlaylistCreateMenuItems(
+                        onCreateSmartPlaylist = { showSmartPlaylistDialog = true },
                         onDismiss = { menuExpanded = false },
                     )
                 }
