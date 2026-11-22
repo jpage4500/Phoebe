@@ -134,6 +134,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.composed
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -2827,6 +2828,7 @@ private fun PlaybackFailureSnackbar(
                 streamUrl != null -> "Copy URL"
                 else -> "Dismiss"
             },
+            onDismiss = onDismiss,
             onAction = {
                 if (streamUrl == null) {
                     onDismiss()
@@ -2870,6 +2872,7 @@ private fun SongRadioUndoSnackbar(
                 message = shown.message,
                 actionLabel = "Undo",
                 onAction = onUndo,
+                onDismiss = onDismiss,
             )
         }
     }
@@ -2909,6 +2912,7 @@ private fun PlaylistDuplicateSnackbar(
                 onAction = {
                     onMoveToTop(currentPending)
                 },
+                onDismiss = onDismiss,
             )
         }
     }
@@ -2919,14 +2923,47 @@ private fun PhoebeActionSnackbar(
     message: String,
     actionLabel: String,
     onAction: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
+    // Swipe left/right to dismiss. Past ~35% of the width (or a fast fling) it flies off and
+    // dismisses; otherwise it springs back.
+    val scope = rememberCoroutineScope()
+    val offsetX = remember { Animatable(0f) }
+    var widthPx by remember { mutableStateOf(0) }
+    LaunchedEffect(message) { offsetX.snapTo(0f) }
+    val dragState = rememberDraggableState { delta ->
+        scope.launch { offsetX.snapTo(offsetX.value + delta) }
+    }
     Surface(
         color = PhoebeUi.panel.copy(alpha = 0.96f),
         contentColor = PhoebeUi.primaryText,
         shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, PhoebeUi.border),
         shadowElevation = 12.dp,
-        modifier = Modifier.widthIn(max = 520.dp),
+        modifier = Modifier
+            .widthIn(max = 520.dp)
+            .onSizeChanged { widthPx = it.width }
+            .graphicsLayer {
+                translationX = offsetX.value
+                alpha = if (widthPx > 0) (1f - abs(offsetX.value) / widthPx).coerceIn(0f, 1f) else 1f
+            }
+            .draggable(
+                state = dragState,
+                orientation = Orientation.Horizontal,
+                onDragStopped = { velocity ->
+                    val width = widthPx.toFloat().coerceAtLeast(1f)
+                    val offset = offsetX.value
+                    val flung = abs(velocity) > 1_000f && (offset == 0f || velocity * offset > 0f)
+                    if (abs(offset) > width * 0.35f || flung) {
+                        val direction = if (offset != 0f) offset else velocity
+                        val target = if (direction > 0f) width * 1.2f else -width * 1.2f
+                        offsetX.animateTo(target, tween(140))
+                        onDismiss()
+                    } else {
+                        offsetX.animateTo(0f, spring())
+                    }
+                },
+            ),
     ) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
