@@ -3459,7 +3459,7 @@ class AppState(
         }
     }
 
-    private fun stopPlayback() {
+    fun stopPlayback() {
         cancelLibraryRadioFill()
         mutableMusicAssistantRemotePlayback.value = null
         dependencies.playbackTransportService.stopPlayback()

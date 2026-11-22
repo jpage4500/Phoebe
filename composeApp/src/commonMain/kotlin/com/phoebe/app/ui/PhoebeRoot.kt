@@ -2263,19 +2263,70 @@ private fun PhoebeRootStateHolder(
                         }
 
                         val scope = rememberCoroutineScope()
+                        // Swipe-down-to-dismiss for the collapsed mini player. The first drag delta
+                        // locks the gesture into either expanding the player or dismissing it.
+                        val miniPlayerDismissOffset = remember { Animatable(0f) }
+                        var miniPlayerDismissDragPx by remember { mutableFloatStateOf(0f) }
+                        var miniPlayerDragMode by remember { mutableStateOf(MiniPlayerDragMode.Expand) }
                         val onDragStart = {
                             scope.launch { playerExpansionFraction.stop() }
+                            val collapsed = playerExpansionFraction.value < 0.001f && !mobilePlayerAsSheet
+                            miniPlayerDragMode = if (collapsed) MiniPlayerDragMode.Undecided else MiniPlayerDragMode.Expand
+                            miniPlayerDismissDragPx = 0f
                             Unit
                         }
                         val onDrag = { deltaY: Float ->
-                            val current = playerExpansionFraction.value
-                            val delta = -deltaY / dragRangePx
-                            scope.launch {
-                                playerExpansionFraction.snapTo((current + delta).coerceIn(0f, 1f))
+                            if (miniPlayerDragMode == MiniPlayerDragMode.Undecided) {
+                                miniPlayerDragMode = if (deltaY > 0f) MiniPlayerDragMode.Dismiss else MiniPlayerDragMode.Expand
+                            }
+                            if (miniPlayerDragMode == MiniPlayerDragMode.Dismiss) {
+                                val target = (miniPlayerDismissDragPx + deltaY).coerceIn(0f, miniPlayerHeightPx)
+                                miniPlayerDismissDragPx = target
+                                scope.launch { miniPlayerDismissOffset.snapTo(target) }
+                            } else {
+                                val current = playerExpansionFraction.value
+                                val delta = -deltaY / dragRangePx
+                                scope.launch {
+                                    playerExpansionFraction.snapTo((current + delta).coerceIn(0f, 1f))
+                                }
                             }
                             Unit
                         }
-                        val onDragEnd = { velocityY: Float ->
+                        val onMiniPlayerDismissEnd = { velocityY: Float ->
+                            val releaseOffset = miniPlayerDismissDragPx
+                            miniPlayerDismissDragPx = 0f
+                            miniPlayerDragMode = MiniPlayerDragMode.Expand
+                            val shouldDismiss = when {
+                                velocityY < -350f -> false
+                                velocityY > 800f -> true
+                                else -> releaseOffset > miniPlayerHeightPx * 0.5f
+                            }
+                            scope.launch {
+                                if (shouldDismiss) {
+                                    miniPlayerDismissOffset.animateTo(
+                                        targetValue = miniPlayerHeightPx,
+                                        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+                                    )
+                                    state.stopPlayback()
+                                    // Normally the bar leaves composition once the track clears; if a
+                                    // remote target keeps reporting a track, bring the bar back.
+                                    delay(500)
+                                    miniPlayerDismissOffset.snapTo(0f)
+                                } else {
+                                    miniPlayerDismissOffset.animateTo(
+                                        0f,
+                                        spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy),
+                                    )
+                                }
+                            }
+                            Unit
+                        }
+                        val onDragEnd = onDragEnd@{ velocityY: Float ->
+                            if (miniPlayerDragMode == MiniPlayerDragMode.Dismiss) {
+                                onMiniPlayerDismissEnd(velocityY)
+                                return@onDragEnd
+                            }
+                            miniPlayerDragMode = MiniPlayerDragMode.Expand
                             val current = playerExpansionFraction.value
                             val shouldExpand = when {
                                 velocityY < -350f -> true
@@ -2367,7 +2418,10 @@ private fun PhoebeRootStateHolder(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .graphicsLayer {
-                                    translationY = dragRangePx * (1f - playerExpansionFraction.value)
+                                    // A dismissing bar slides down behind the bottom nav (zIndex 5).
+                                    val dismissOffset = miniPlayerDismissOffset.value
+                                    translationY = dragRangePx * (1f - playerExpansionFraction.value) + dismissOffset
+                                    alpha = (1f - dismissOffset / miniPlayerHeightPx).coerceIn(0f, 1f)
                                 }
                                 .zIndex(4f)
                         )
@@ -3376,3 +3430,5 @@ private fun List<DownloadItem>.toDownloadManagerUiSummary(activeDownloadJobCount
         failed = count { it.state == DownloadState.Failed },
         estimatedBytes = filter { it.state == DownloadState.Complete }.sumOf { it.downloadedBytes },
     )
+
+private enum class MiniPlayerDragMode { Undecided, Expand, Dismiss }
