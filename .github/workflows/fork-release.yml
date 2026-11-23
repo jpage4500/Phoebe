@@ -22,8 +22,10 @@ on:
       - main
   workflow_dispatch:
 
+# Serialize real releases. PRs closed without merging get their own group, otherwise their
+# no-op run could replace (cancel) a pending release run in the queue.
 concurrency:
-  group: fork-release
+  group: fork-release-${{ (github.event_name == 'pull_request' && !github.event.pull_request.merged) && github.run_id || 'publish' }}
   cancel-in-progress: false
 
 permissions:
@@ -71,7 +73,8 @@ jobs:
             exit 1
           fi
           # Upstream's versionCode only goes up and so does run_number, so the sum keeps
-          # increasing and each APK can install over the last one.
+          # increasing: each APK installs over the last, and desktop installers (whose
+          # version is 100.0.<versionCode> for date-style names) upgrade cleanly.
           version_code=$((base_code + GITHUB_RUN_NUMBER))
           version="$(date -u +"%Y.%m%d.%H%M")"
           {
@@ -141,6 +144,10 @@ jobs:
           fi
           keystore_path="${RUNNER_TEMP}/phoebe-release.jks"
           echo "${KMP_KEYSTORE}" | base64 --decode > "${keystore_path}"
+          if ! keytool -list -keystore "${keystore_path}" -storepass "${KMP_SIGNING_STORE_PASSWORD}" -alias "${KMP_SIGNING_KEY_ALIAS}" > /dev/null; then
+            echo "::error::KMP_KEYSTORE could not be opened with KMP_SIGNING_STORE_PASSWORD / KMP_SIGNING_KEY_ALIAS (KMP_KEYSTORE must be the base64 of the keystore file)"
+            exit 1
+          fi
           {
             echo "PHOEBE_ANDROID_SIGNING_STORE_FILE=${keystore_path}"
             echo "PHOEBE_ANDROID_SIGNING_STORE_PASSWORD=${KMP_SIGNING_STORE_PASSWORD}"
@@ -166,7 +173,7 @@ jobs:
             echo "::error::Could not find the release APK"
             exit 1
           fi
-          cp "${apk}" "release-artifacts/Phoebe-${VERSION}.apk"
+          cp "${apk}" "release-artifacts/PhoebePlus-${VERSION}.apk"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -214,6 +221,7 @@ jobs:
           ./gradlew
           :composeApp:packageReleaseDmg
           -Pphoebe.versionName=${{ needs.version.outputs.version }}
+          -Pphoebe.versionCode=${{ needs.version.outputs.version_code }}
 
       - name: Print packaging logs
         if: failure()
@@ -234,7 +242,7 @@ jobs:
             echo "::error::Could not find the DMG"
             exit 1
           fi
-          cp "${dmg}" "release-artifacts/Phoebe-${VERSION}-macos-arm64.dmg"
+          cp "${dmg}" "release-artifacts/PhoebePlus-${VERSION}-macos-arm64.dmg"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -284,6 +292,7 @@ jobs:
           ./gradlew
           :composeApp:packageReleaseMsi
           "-Pphoebe.versionName=${{ needs.version.outputs.version }}"
+          "-Pphoebe.versionCode=${{ needs.version.outputs.version_code }}"
 
       - name: Collect MSI
         shell: pwsh
@@ -293,7 +302,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path "release-artifacts" | Out-Null
           $msi = Get-ChildItem -Path "composeApp/build" -Recurse -Filter "*.msi" | Select-Object -First 1
           if (-not $msi) { throw "Could not find the MSI" }
-          Copy-Item $msi.FullName "release-artifacts/Phoebe-${env:VERSION}.msi"
+          Copy-Item $msi.FullName "release-artifacts/PhoebePlus-${env:VERSION}.msi"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -340,6 +349,7 @@ jobs:
           ./gradlew
           :composeApp:packageReleaseDeb
           -Pphoebe.versionName=${{ needs.version.outputs.version }}
+          -Pphoebe.versionCode=${{ needs.version.outputs.version_code }}
 
       - name: Collect DEB
         shell: bash
@@ -352,7 +362,7 @@ jobs:
             echo "::error::Could not find the DEB"
             exit 1
           fi
-          cp "${deb}" "release-artifacts/Phoebe-${VERSION}.deb"
+          cp "${deb}" "release-artifacts/PhoebePlus-${VERSION}.deb"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -369,7 +379,7 @@ jobs:
       - windows
       - linux
     # Publish whatever platforms built, so one flaky desktop runner doesn't block the APK.
-    if: always() && needs.version.result == 'success'
+    if: ${{ !cancelled() && needs.version.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
