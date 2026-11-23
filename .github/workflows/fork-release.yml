@@ -33,7 +33,7 @@ env:
   JAVA_DISTRIBUTION: temurin
   BUILD_REF: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
   FORK_APPLICATION_ID: com.phoebe.app.fork
-  FORK_APP_NAME: Phoebe Fork
+  FORK_APP_NAME: Phoebe+
 
 jobs:
   version:
