@@ -59,7 +59,7 @@ jobs:
       tag_name: ${{ steps.version.outputs.tag_name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.BUILD_REF }}
 
@@ -98,18 +98,19 @@ jobs:
       PHOEBE_GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.PHOEBE_GOOGLE_MAPS_ANDROID_API_KEY }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.BUILD_REF }}
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           java-version: ${{ env.JAVA_VERSION }}
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        # v5, not v6: v6 moves caching into a proprietary component with its own terms of use.
+        uses: gradle/actions/setup-gradle@v5
 
       - name: Rebrand as Phoebe+
         shell: bash
@@ -175,7 +176,7 @@ jobs:
           fi
           cp "${apk}" "release-artifacts/PhoebePlus-${VERSION}.apk"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android
           if-no-files-found: error
@@ -190,18 +191,19 @@ jobs:
       PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY: ${{ secrets.PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.BUILD_REF }}
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           java-version: ${{ env.JAVA_VERSION }}
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        # v5, not v6: v6 moves caching into a proprietary component with its own terms of use.
+        uses: gradle/actions/setup-gradle@v5
 
       - name: Rebrand as Phoebe+
         shell: bash
@@ -244,7 +246,7 @@ jobs:
           fi
           cp "${dmg}" "release-artifacts/PhoebePlus-${VERSION}-macos-arm64.dmg"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos
           if-no-files-found: error
@@ -259,18 +261,19 @@ jobs:
       PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY: ${{ secrets.PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.BUILD_REF }}
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           java-version: ${{ env.JAVA_VERSION }}
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        # v5, not v6: v6 moves caching into a proprietary component with its own terms of use.
+        uses: gradle/actions/setup-gradle@v5
 
       - name: Rebrand as Phoebe+
         shell: bash
@@ -304,7 +307,7 @@ jobs:
           if (-not $msi) { throw "Could not find the MSI" }
           Copy-Item $msi.FullName "release-artifacts/PhoebePlus-${env:VERSION}.msi"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           if-no-files-found: error
@@ -319,18 +322,19 @@ jobs:
       PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY: ${{ secrets.PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.BUILD_REF }}
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           java-version: ${{ env.JAVA_VERSION }}
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        # v5, not v6: v6 moves caching into a proprietary component with its own terms of use.
+        uses: gradle/actions/setup-gradle@v5
 
       - name: Rebrand as Phoebe+
         shell: bash
@@ -364,7 +368,7 @@ jobs:
           fi
           cp "${deb}" "release-artifacts/PhoebePlus-${VERSION}.deb"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           if-no-files-found: error
@@ -384,7 +388,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-artifacts
           merge-multiple: true
@@ -420,9 +424,16 @@ jobs:
             echo
             echo "Desktop builds are unsigned. macOS: after installing, run \`xattr -dr com.apple.quarantine /Applications/Phoebe+.app\`. Windows: SmartScreen > More info > Run anyway."
           } > notes.md
-          gh release create "${TAG}" "${files[@]}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --target "${BUILD_REF}" \
-            --title "Phoebe+ ${VERSION}" \
-            --notes-file notes.md \
-            --latest
+          # Re-running a failed platform job re-runs this step too: add its files to the
+          # release the first attempt created instead of failing on the existing tag.
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" > /dev/null 2>&1; then
+            gh release upload "${TAG}" "${files[@]}" --repo "${GITHUB_REPOSITORY}" --clobber
+            gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --notes-file notes.md
+          else
+            gh release create "${TAG}" "${files[@]}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${BUILD_REF}" \
+              --title "Phoebe+ ${VERSION}" \
+              --notes-file notes.md \
+              --latest
+          fi
