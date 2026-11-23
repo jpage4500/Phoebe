@@ -43,3 +43,15 @@ val LocalSavedSearchActions = compositionLocalOf {
         deleteSearch = {},
     )
 }
+
+/**
+ * Server-side song search (Subsonic `search3`). Octo returns songs that aren't in the library yet; those
+ * are merged into search results after the local catalog matches.
+ */
+@Immutable
+data class ServerSearchActions(
+    val enabled: Boolean = false,
+    val searchTracks: suspend (query: String) -> List<Track> = { emptyList() },
+)
+
+val LocalServerSearch = compositionLocalOf { ServerSearchActions() }

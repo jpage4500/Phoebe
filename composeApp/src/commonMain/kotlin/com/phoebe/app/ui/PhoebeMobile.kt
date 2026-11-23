@@ -36,9 +36,11 @@ import com.phoebe.app.feature.library.LibraryMobileRoute
 import com.phoebe.app.feature.library.LibraryRouteActions
 import com.phoebe.app.feature.library.LibraryRouteState
 import com.phoebe.app.feature.library.LibraryViewMode
+import com.phoebe.app.feature.library.PlaylistCreateMenuItems
 import com.phoebe.app.feature.library.PlaylistsMobileRoute
 import com.phoebe.app.feature.library.PlaylistsRouteActions
 import com.phoebe.app.feature.library.PlaylistsRouteState
+import com.phoebe.app.feature.library.SmartPlaylistTemplateDialog
 import com.phoebe.app.feature.library.resolvedViewMode
 import com.phoebe.app.feature.library.LibrarySectionIndexMode
 import com.phoebe.app.feature.radio.RadioRoute
@@ -131,8 +133,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -283,9 +285,6 @@ internal fun MobileBrowseShell(
     onRecentSongs: () -> Unit,
     onRecentArtists: () -> Unit,
     onRecentAlbums: () -> Unit,
-    onFavoritePlaylists: () -> Unit,
-    onFavoriteArtists: () -> Unit,
-    onFavoriteAlbums: () -> Unit,
     onRecentlyPlayed: () -> Unit,
     onMostPlayed: () -> Unit,
     onCollections: (CollectionEntry) -> Unit,
@@ -422,6 +421,40 @@ internal fun MobileBrowseShell(
     showBottomChrome: Boolean = true,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    var confirmSignOut by remember { mutableStateOf(false) }
+    if (confirmSignOut) {
+        SignOutConfirmationDialog(
+            serverName = session?.selectedServer?.name,
+            onDismiss = { confirmSignOut = false },
+            onConfirm = {
+                confirmSignOut = false
+                onSignOut()
+            },
+        )
+    }
+    var showSmartPlaylistDialog by remember { mutableStateOf(false) }
+    if (showSmartPlaylistDialog) {
+        SmartPlaylistTemplateDialog(catalog = catalog, onDismiss = { showSmartPlaylistDialog = false })
+    }
+    var libraryFavoritesOnly by rememberSaveable { mutableStateOf(false) }
+    var playlistsFavoritesOnly by rememberSaveable { mutableStateOf(false) }
+    // Home's favorites "View all" opens the matching browse tab with its favorites filter on.
+    val onFavoritePlaylists: () -> Unit = {
+        playlistsFavoritesOnly = true
+        onNavigate(BrowseSection.Playlists)
+    }
+    val onFavoriteArtists: () -> Unit = {
+        libraryFavoritesOnly = true
+        onLibraryFilter(LibraryFilterTab.Artists)
+        onNavigate(BrowseSection.Library)
+    }
+    val onFavoriteAlbums: () -> Unit = {
+        libraryFavoritesOnly = true
+        onLibraryFilter(LibraryFilterTab.Albums)
+        onNavigate(BrowseSection.Library)
+    }
+    // The query itself resets on section change upstream; the expanded field should too.
+    var toolbarSearchExpanded by remember(section, selectedPlaylistId) { mutableStateOf(false) }
     val mobileLibraryViewMode = libraryUi.resolvedViewMode()
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
     val availableUpdate = when (val updateState = appUpdateState) {
@@ -470,6 +503,38 @@ internal fun MobileBrowseShell(
             section == BrowseSection.Charts ||
             section == BrowseSection.Playlists ||
             section == BrowseSection.Radio)
+    val toolbarFilters = selectedPlaylistId == null &&
+        (section == BrowseSection.Library || section == BrowseSection.Playlists)
+    val toolbarSearch = if (toolbarFilters) {
+        MobileToolbarSearch(
+            query = searchQuery,
+            onQueryChange = onSearchQuery,
+            expanded = toolbarSearchExpanded,
+            onExpandedChange = { toolbarSearchExpanded = it },
+            placeholder = if (section == BrowseSection.Playlists) {
+                "Search playlists"
+            } else {
+                when (libraryFilter) {
+                    LibraryFilterTab.Artists -> "Search artists"
+                    LibraryFilterTab.Albums -> "Search albums"
+                    LibraryFilterTab.Songs -> "Search songs"
+                }
+            },
+        )
+    } else {
+        null
+    }
+    val toolbarFavoritesFilter = when {
+        !toolbarFilters -> null
+        section == BrowseSection.Playlists -> MobileToolbarFavoritesFilter(
+            enabled = playlistsFavoritesOnly,
+            onEnabledChange = { playlistsFavoritesOnly = it },
+        )
+        else -> MobileToolbarFavoritesFilter(
+            enabled = libraryFavoritesOnly,
+            onEnabledChange = { libraryFavoritesOnly = it },
+        )
+    }
     val browseTopBar: @Composable () -> Unit = {
         val debugEventsMenu = onOpenEventsDebugMenu.takeIf {
             isDebugBuild() && section == BrowseSection.Settings && selectedPlaylistId == null
@@ -493,6 +558,8 @@ internal fun MobileBrowseShell(
                 !(section == BrowseSection.Settings && selectedPlaylistId == null),
             menuTint = if (availableUpdate != null) PhoebeUpdateBlue else PhoebeUi.primaryText,
             onMenuLongClick = debugEventsMenu,
+            search = toolbarSearch,
+            favoritesFilter = toolbarFavoritesFilter,
             menuContent = {
                 if (section == BrowseSection.Library && selectedPlaylistId == null) {
                     DropdownMenuItem(
@@ -508,6 +575,12 @@ internal fun MobileBrowseShell(
                         libraryViewMode = mobileLibraryViewMode,
                         onLibraryViewMode = onLibraryViewMode,
                         onColumns = onLibraryColumns,
+                        onDismiss = { menuExpanded = false },
+                    )
+                }
+                if (section == BrowseSection.Playlists && selectedPlaylistId == null) {
+                    PlaylistCreateMenuItems(
+                        onCreateSmartPlaylist = { showSmartPlaylistDialog = true },
                         onDismiss = { menuExpanded = false },
                     )
                 }
@@ -588,18 +661,20 @@ internal fun MobileBrowseShell(
                         menuExpanded = false
                     },
                 )
-                DropdownMenuItem(
-                    text = {
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            PhoebeIconView(PhoebeIcon.Settings, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
-                            Text("Settings")
-                        }
-                    },
-                    onClick = {
-                        onNavigate(BrowseSection.Settings)
-                        menuExpanded = false
-                    },
-                )
+                if (!(section == BrowseSection.Settings && selectedPlaylistId == null)) {
+                    DropdownMenuItem(
+                        text = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                PhoebeIconView(PhoebeIcon.Settings, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
+                                Text("Settings")
+                            }
+                        },
+                        onClick = {
+                            onNavigate(BrowseSection.Settings)
+                            menuExpanded = false
+                        },
+                    )
+                }
                 DropdownMenuItem(
                     text = { Text("Refresh library") },
                     onClick = {
@@ -618,8 +693,8 @@ internal fun MobileBrowseShell(
                     DropdownMenuItem(
                         text = { Text("Sign out") },
                         onClick = {
-                            onSignOut()
                             menuExpanded = false
+                            confirmSignOut = true
                         },
                     )
                 } else {
@@ -661,11 +736,7 @@ internal fun MobileBrowseShell(
                         appUpdateState = appUpdateState,
                         pairedDevices = pairedDevices,
                         remoteControlClientState = remoteControlClientState,
-                        initialCategory = if (section == BrowseSection.Downloads) {
-                            SettingsCategory.Downloads
-                        } else {
-                            SettingsCategory.Account
-                        },
+                        initialCategory = SettingsCategory.Downloads.takeIf { section == BrowseSection.Downloads },
                     ),
                     actions = SettingsRouteActions(
                         onLightModeChange = onUseLightAppearanceChange,
@@ -827,6 +898,7 @@ internal fun MobileBrowseShell(
                         libraryUi = libraryUi,
                         searchQuery = searchQuery,
                         jellyfinPagination = (session.isEmbyFamily() || session.isNavidrome()) && session?.jellyfinSyncMode == JellyfinSyncMode.Quick,
+                        favoritesOnly = libraryFavoritesOnly,
                     ),
                     actions = LibraryRouteActions(
                         onJellyfinPage = onJellyfinPage,
@@ -897,6 +969,7 @@ internal fun MobileBrowseShell(
                         catalog = catalog,
                         catalogRefreshing = catalogRefreshing,
                         searchQuery = searchQuery,
+                        favoritesOnly = playlistsFavoritesOnly,
                     ),
                     actions = PlaylistsRouteActions(
                         onSearchQuery = onSearchQuery,

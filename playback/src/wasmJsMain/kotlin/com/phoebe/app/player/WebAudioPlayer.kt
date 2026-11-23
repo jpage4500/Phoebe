@@ -296,7 +296,7 @@ private class WebAudioPlayer(
                         prepared.pause()
                         setWebAudioCurrentTime(prepared, 0.0)
                         prepared.muted = false
-                        prepared.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
+                        prepared.volume = effectiveOutputVolume(queue, targetIndex).toDouble().coerceIn(0.0, 1.0)
                         webGaplessPrerolled = true
                     }
                 }
@@ -315,7 +315,7 @@ private class WebAudioPlayer(
                 return@playWebAudio
             }
             prepared.muted = false
-            prepared.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
+            prepared.volume = effectiveOutputVolume(queue, targetIndex).toDouble().coerceIn(0.0, 1.0)
         }
         webGaplessHotStartJob?.cancel()
         webGaplessHotStartJob = scope.launch {
@@ -362,7 +362,7 @@ private class WebAudioPlayer(
         webGaplessTrackId = null
         webGaplessUri = null
         incoming.muted = false
-        incoming.volume = effectiveOutputVolume().toDouble().coerceIn(0.0, 1.0)
+        incoming.volume = effectiveOutputVolume(queue, targetIndex).toDouble().coerceIn(0.0, 1.0)
         if (!hotStarted) {
             setWebAudioCurrentTime(incoming, 0.0)
         }
@@ -370,7 +370,7 @@ private class WebAudioPlayer(
         installAudioEventHandlers(generation)
         prepareAudioElementForCurrentEqualizer()
         applyCurrentEqualizer()
-        setOutputVolume(effectiveOutputVolume())
+        setOutputVolume(effectiveOutputVolume(queue, targetIndex))
         disposeWebAudioElement(outgoing)
         if (playWhenReady && !hotStarted) {
             playWebAudio(generation)
@@ -564,6 +564,7 @@ private class WebAudioPlayer(
         outgoingUsesWebAudioGain: Boolean,
         incomingUsesWebAudioGain: Boolean,
     ) {
+        val incomingTargetVolume = effectiveOutputVolume(queue, targetIndex)
         webCrossfadeJob?.cancel()
         webCrossfadeJob = scope.launch {
             try {
@@ -573,7 +574,7 @@ private class WebAudioPlayer(
                     if (!isWebCrossfadeCurrent(generation, outgoing, incoming)) return@launch
                     val progress = (index + 1).toFloat() / WebCrossfadeSteps.toFloat()
                     val outgoingVolume = (baseVolume * (1f - progress)).coerceIn(0f, 1f)
-                    val incomingVolume = (baseVolume * progress).coerceIn(0f, 1f)
+                    val incomingVolume = (incomingTargetVolume * progress).coerceIn(0f, 1f)
                     diagnostics.crossfadeVolume(
                         engine = PlaybackEnginePath.WebAudioElement,
                         step = index + 1,
@@ -639,7 +640,7 @@ private class WebAudioPlayer(
         installAudioEventHandlers(generation)
         prepareAudioElementForCurrentEqualizer()
         applyCurrentEqualizer()
-        setOutputVolume(effectiveOutputVolume())
+        setOutputVolume(effectiveOutputVolume(queue, targetIndex))
         adoptCrossfadeTarget(
             queue = queue,
             targetIndex = targetIndex,
@@ -1432,7 +1433,10 @@ private external fun webAudioSourceMatchesUri(audio: HTMLAudioElement, uri: Stri
                 try { eq.gain.disconnect(); } catch (_) {}
             }
             if (eq.context && typeof eq.context.close === "function") {
-                try { eq.context.close(); } catch (_) {}
+                try {
+                    const closed = eq.context.close();
+                    if (closed && typeof closed.catch === "function") closed.catch(() => {});
+                } catch (_) {}
             }
             globalThis.__phoebeEqualizer = null;
         }
@@ -1442,7 +1446,10 @@ private external fun webAudioSourceMatchesUri(audio: HTMLAudioElement, uri: Stri
             try { entry.source.disconnect(); } catch (_) {}
             try { entry.gain.disconnect(); } catch (_) {}
             if (entry.context && typeof entry.context.close === "function") {
-                try { entry.context.close(); } catch (_) {}
+                try {
+                    const closed = entry.context.close();
+                    if (closed && typeof closed.catch === "function") closed.catch(() => {});
+                } catch (_) {}
             }
             gains.delete(audio);
         }
@@ -1492,7 +1499,10 @@ private external fun releaseWebAudioMediaBuffers(audio: HTMLAudioElement)
             eq = { audio, context, source, nodes: [], gain: null, gainValue: Number.isFinite(gainValue) ? gainValue : 1 };
             globalThis.__phoebeEqualizer = eq;
         }
-        eq.context.resume?.();
+        try {
+            const resumed = eq.context.resume?.();
+            if (resumed && typeof resumed.catch === "function") resumed.catch(() => {});
+        } catch (_) {}
         try { eq.source.disconnect(); } catch (_) {}
         for (const node of eq.nodes || []) {
             try { node.disconnect(); } catch (_) {}
@@ -1560,7 +1570,10 @@ private external fun isWebEqualizerAttached(audio: HTMLAudioElement): Boolean
                 eq.gain = eq.context.createGain();
             }
             eq.gainValue = gain;
-            try { eq.context.resume?.(); } catch (_) {}
+            try {
+                const resumed = eq.context.resume?.();
+                if (resumed && typeof resumed.catch === "function") resumed.catch(() => {});
+            } catch (_) {}
             try { eq.gain.gain.setValueAtTime(gain, eq.context.currentTime || 0); } catch (_) {
                 eq.gain.gain.value = gain;
             }
@@ -1589,7 +1602,10 @@ private external fun isWebEqualizerAttached(audio: HTMLAudioElement): Boolean
             gains.set(audio, entry);
         }
         if (!entry) return false;
-        try { entry.context.resume?.(); } catch (_) {}
+        try {
+            const resumed = entry.context.resume?.();
+            if (resumed && typeof resumed.catch === "function") resumed.catch(() => {});
+        } catch (_) {}
         try { entry.gain.gain.setValueAtTime(gain, entry.context.currentTime || 0); } catch (_) {
             entry.gain.gain.value = gain;
         }
@@ -1634,7 +1650,10 @@ private external fun stopWebAudioAnalysis(audio: HTMLAudioElement)
                 try { eq.gain.disconnect(); } catch (_) {}
             }
             if (eq.context && typeof eq.context.close === "function") {
-                try { eq.context.close(); } catch (_) {}
+                try {
+                    const closed = eq.context.close();
+                    if (closed && typeof closed.catch === "function") closed.catch(() => {});
+                } catch (_) {}
             }
             globalThis.__phoebeEqualizer = null;
         }
@@ -1644,7 +1663,10 @@ private external fun stopWebAudioAnalysis(audio: HTMLAudioElement)
             try { entry.source.disconnect(); } catch (_) {}
             try { entry.gain.disconnect(); } catch (_) {}
             if (entry.context && typeof entry.context.close === "function") {
-                try { entry.context.close(); } catch (_) {}
+                try {
+                    const closed = entry.context.close();
+                    if (closed && typeof closed.catch === "function") closed.catch(() => {});
+                } catch (_) {}
             }
             gains.delete(audio);
         }
@@ -1728,7 +1750,10 @@ private external fun setWebAudioCurrentTime(audio: HTMLAudioElement, seconds: Do
             }
             const eq = globalThis.__phoebeEqualizer;
             if (eq && eq.audio === audio && eq.source) {
-                eq.context?.resume?.();
+                try {
+                    const resumed = eq.context?.resume?.();
+                    if (resumed && typeof resumed.catch === "function") resumed.catch(() => {});
+                } catch (_) {}
             }
             const playResult = audio.play();
             if (playResult && typeof playResult.catch === "function") {

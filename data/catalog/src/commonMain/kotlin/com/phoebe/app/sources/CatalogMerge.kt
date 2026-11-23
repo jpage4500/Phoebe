@@ -46,6 +46,7 @@ object CatalogMerge {
             similarArtistsByArtist = snapshot.similarArtistsByArtist
                 .mapKeys { (k, _) -> k.withPrefix(p) }
                 .mapValues { (_, artists) -> artists.map { artist -> artist.copy(id = artist.id.withPrefix(p)) } },
+            artistBiographyByArtist = snapshot.artistBiographyByArtist.mapKeys { (k, _) -> k.withPrefix(p) },
             collectionValues = snapshot.collectionValues,
             collectionValueLoads = snapshot.collectionValueLoads,
             collectionTags = snapshot.collectionTags.map { it.copy(itemId = p + it.itemId) },
@@ -68,6 +69,7 @@ object CatalogMerge {
             popularTracksByArtist = all.fold(emptyMap()) { acc, s -> acc + s.popularTracksByArtist },
             popularTracksByLibrary = all.fold(emptyMap()) { acc, s -> acc + s.popularTracksByLibrary },
             similarArtistsByArtist = all.fold(emptyMap()) { acc, s -> acc + s.similarArtistsByArtist },
+            artistBiographyByArtist = all.fold(emptyMap()) { acc, s -> acc + s.artistBiographyByArtist },
             collectionValues = all.flatMap { it.collectionValues }.distinct(),
             collectionValueLoads = all.flatMap { it.collectionValueLoads }.distinct(),
             collectionTags = all.flatMap { it.collectionTags }.distinct(),

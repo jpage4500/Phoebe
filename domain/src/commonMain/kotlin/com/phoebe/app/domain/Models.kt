@@ -559,6 +559,8 @@ data class Track(
      * connection used at catalog time is no longer reachable. Ephemeral; not persisted.
      */
     val playbackFallbackUrls: List<String> = emptyList(),
+    /** Streamable from the server but not in the user's library yet (Octo `isExternal`). */
+    val isExternal: Boolean = false,
 )
 
 fun List<Track>.mergeDownloadCopiesById(): List<Track> {
@@ -1496,17 +1498,33 @@ data class AudioProcessingSettings(
     val selectedOutputDeviceId: String? = null,
     val exclusiveMode: Boolean = false,
     val bitPerfectPreference: Boolean = false,
+    val normalizationMode: NormalizationMode = NormalizationMode.Off,
+    /** Added to the ReplayGain value of tracks that have loudness data. */
+    val normalizationPreampDb: Float = 0f,
+    /** Applied instead of ReplayGain to tracks with no loudness data. */
+    val normalizationFallbackGainDb: Float = 0f,
+    /** Cap the applied gain using peak values so boosted tracks do not clip. */
+    val normalizationPreventClipping: Boolean = true,
 ) {
     fun normalized(): AudioProcessingSettings =
         copy(
             crossfeedAmount = crossfeedAmount.coerceIn(0f, 1f),
+            normalizationPreampDb = normalizationPreampDb.finiteOrZero()
+                .coerceIn(LoudnessNormalization.MinPreampDb, LoudnessNormalization.MaxPreampDb),
+            normalizationFallbackGainDb = normalizationFallbackGainDb.finiteOrZero()
+                .coerceIn(LoudnessNormalization.MinFallbackGainDb, LoudnessNormalization.MaxFallbackGainDb),
             exclusiveMode = exclusiveMode && !hasLocalDspEnabled,
             bitPerfectPreference = bitPerfectPreference && !hasLocalDspEnabled,
         )
 
     val hasLocalDspEnabled: Boolean
         get() = crossfeedEnabled
+
+    val normalizationEnabled: Boolean
+        get() = normalizationMode != NormalizationMode.Off
 }
+
+private fun Float.finiteOrZero(): Float = if (isFinite()) this else 0f
 
 @Serializable
 data class AudioProcessingCapabilities(
@@ -1875,6 +1893,8 @@ data class CatalogSnapshot(
     val popularTracksByArtist: Map<String, List<Track>> = emptyMap(),
     val popularTracksByLibrary: Map<String, List<Track>> = emptyMap(),
     val similarArtistsByArtist: Map<String, List<Artist>> = emptyMap(),
+    /** Artist biographies fetched on demand (e.g. Navidrome `getArtistInfo2`), keyed by artist id. */
+    val artistBiographyByArtist: Map<String, String> = emptyMap(),
     val collectionValues: List<CatalogCollectionValue> = emptyList(),
     val collectionValueLoads: List<CatalogCollectionValueLoad> = emptyList(),
     val collectionTags: List<CatalogCollectionTag> = emptyList(),

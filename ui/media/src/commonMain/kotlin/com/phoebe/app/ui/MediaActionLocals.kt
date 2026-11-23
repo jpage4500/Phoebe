@@ -318,6 +318,13 @@ data class FavoriteActions(
     fun isFavorite(artist: Artist): Boolean =
         catalog.artists.firstOrNull { it.id == artist.id }?.favorite ?: artist.favorite
 
+    /**
+     * Only artists in the library can be starred (Octo answers error 70 for artists it streams but
+     * doesn't own), so hide the heart for anything missing from the loaded catalog.
+     */
+    fun canFavorite(artist: Artist): Boolean =
+        catalog.artists.isEmpty() || catalog.artists.any { it.id == artist.id }
+
     fun isFavorite(album: Album): Boolean =
         catalog.albums.firstOrNull { it.id == album.id }?.favorite ?: album.favorite
 
@@ -360,6 +367,14 @@ data class TrackNavigationActions(
 )
 
 val LocalTrackNavigationActions = compositionLocalOf { TrackNavigationActions() }
+
+/** Starts a radio seeded by a song; [canStart] is false for servers without similar-track support. */
+data class SongRadioActions(
+    val canStart: (Track) -> Boolean = { false },
+    val onStart: (Track) -> Unit = {},
+)
+
+val LocalSongRadioActions = compositionLocalOf { SongRadioActions() }
 
 data class MetadataEditorActions(
     val onRequestEdit: (Track) -> Unit = {},

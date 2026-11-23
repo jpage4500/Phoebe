@@ -30,6 +30,7 @@ import com.phoebe.app.domain.LocalMetadataOverride
 import com.phoebe.app.domain.MetadataOverrideSyncStatus
 import com.phoebe.app.domain.MusicLibrary
 import com.phoebe.app.domain.MediaProviderType
+import com.phoebe.app.domain.providerTypeFromCatalogId
 import com.phoebe.app.domain.PlexServer
 import com.phoebe.app.domain.PlexSession
 import com.phoebe.app.domain.LIKED_SONGS_PLAYLIST_BARE_ID
@@ -1014,8 +1015,14 @@ class CatalogRepository(
                 replaceRemoteShell = currentSession.isPlex(),
             )
             if (merged != mutableCatalog.value) {
+                val previous = mutableCatalog.value
                 mutableCatalog.value = merged
                 enqueueCatalogDbWrite { persistCatalogShell(merged) }
+                // The shell write skips track lists; persist a replaced Liked Songs list so stale entries
+                // don't come back from the database on the next launch.
+                merged.playlists
+                    .filter { it.isLikedSongsPlaylist() && merged.tracksByParent[it.id] != previous.tracksByParent[it.id] }
+                    .forEach { persistPlaylistTracksAsync(merged, it.id) }
             }
         }
     }
@@ -1117,8 +1124,28 @@ class CatalogRepository(
             )
         }
         return merged
+            .withServerLikedSongsFrom(prefixed, previous)
             .withRemoteArtworkFrom(previous)
             .withPlaylistUserStateFrom(previous)
+    }
+
+    /**
+     * The shell's Liked Songs list is the server's full starred list, so it replaces the cached one rather
+     * than being unioned into it. Unioning kept entries the server had dropped: songs unstarred elsewhere,
+     * and Octo's streamed (not-in-library) entry after it downloads the song and moves the star to the new
+     * library ID — which showed every downloaded favorite twice in Liked Songs and Library.
+     */
+    private fun CatalogSnapshot.withServerLikedSongsFrom(
+        shell: CatalogSnapshot,
+        previous: CatalogSnapshot,
+    ): CatalogSnapshot {
+        val likedIds = shell.playlists.filter { it.isLikedSongsPlaylist() }.map { it.id }
+        val replacements = likedIds.mapNotNull { id ->
+            val incoming = shell.tracksByParent[id] ?: return@mapNotNull null
+            id to preserveTrackDateAdded(previous.tracksByParent[id].orEmpty(), incoming)
+        }
+        if (replacements.isEmpty()) return this
+        return copy(tracksByParent = tracksByParent + replacements)
     }
 
     private fun CatalogSnapshot.withRemoteArtworkFrom(source: CatalogSnapshot): CatalogSnapshot {
@@ -3784,6 +3811,7 @@ class CatalogRepository(
 
     suspend fun ensurePopularTracksForArtist(session: PlexSession?, artist: Artist): List<Track> {
         mutableCatalog.value.popularTracksByArtist[artist.id]?.let { return it }
+        session?.takeIf { it.isNavidrome() }?.let { return ensureNavidromeTopSongs(it, artist) }
         val plexSession = session?.takeIf { it.isPlex() } ?: return emptyList()
         val ratingKey = plexRatingKey(artist.id) ?: return emptyList()
         val server = plexSession.selectedServer ?: return emptyList()
@@ -3934,6 +3962,7 @@ class CatalogRepository(
 
     suspend fun ensureSimilarArtistsForArtist(session: PlexSession?, artist: Artist): List<Artist> {
         mutableCatalog.value.similarArtistsByArtist[artist.id]?.let { return it }
+        session?.takeIf { it.isNavidrome() }?.let { return ensureNavidromeArtistInfo(it, artist) }
         val plexSession = session?.takeIf { it.isPlex() } ?: return emptyList()
         val ratingKey = plexRatingKey(artist.id) ?: return emptyList()
         val server = plexSession.selectedServer ?: return emptyList()
@@ -3965,6 +3994,75 @@ class CatalogRepository(
                     similarArtistsByArtist = cur.similarArtistsByArtist + (artist.id to similar),
                 )
             }
+        }
+        return similar
+    }
+
+    /** Navidrome `getTopSongs` (Last.fm-ranked, library-only). Cached even when empty; the UI then falls back to play history. */
+    private suspend fun ensureNavidromeTopSongs(session: PlexSession, artist: Artist): List<Track> {
+        if (!artist.id.startsWith("navidrome:")) return emptyList()
+        val server = session.selectedServer ?: return emptyList()
+        val password = session.token.takeIf { it.isNotBlank() } ?: return emptyList()
+        val tracks = subsonicClient.topSongs(
+            server = server,
+            username = session.userName,
+            password = password,
+            artistName = artist.title,
+            count = ArtistPopularTrackLimit,
+        ).map { it.withProviderPrefix("navidrome") }
+        publishNavidromeTracks(tracks)
+        catalogMergeMutex.withLock {
+            val cur = mutableCatalog.value
+            if (cur.popularTracksByArtist[artist.id] == null) {
+                mutableCatalog.value = cur.copy(
+                    popularTracksByArtist = cur.popularTracksByArtist + (artist.id to tracks),
+                )
+            }
+        }
+        return tracks
+    }
+
+    /**
+     * Navidrome `getArtistInfo2`: caches the biography and the server's similar artists. Similar artists
+     * are only cached when non-empty, because a cached empty list hides the artist page's local
+     * tag-based suggestions (servers without Last.fm return nothing).
+     */
+    private suspend fun ensureNavidromeArtistInfo(session: PlexSession, artist: Artist): List<Artist> {
+        if (!artist.id.startsWith("navidrome:")) return emptyList()
+        val server = session.selectedServer ?: return emptyList()
+        val password = session.token.takeIf { it.isNotBlank() } ?: return emptyList()
+        val bareId = artist.id.removePrefix("navidrome:")
+        // Artists derived from album tags get a synthetic id the server doesn't know; resolve those by name.
+        val serverArtistId = if (bareId.isSyntheticNavidromeArtistId()) {
+            subsonicClient.findArtistIdByName(server, session.userName, password, artist.title) ?: return emptyList()
+        } else {
+            bareId
+        }
+        val info = subsonicClient.artistInfo(server, session.userName, password, serverArtistId, ArtistSimilarArtistLimit)
+        val current = mutableCatalog.value
+        val byId = current.artists.associateBy { it.id }
+        val byTitle = current.artists.associateBy { it.title.normalizedArtistLookupKey() }
+        val similar = info.similarArtists
+            .map { candidate ->
+                byId["navidrome:${candidate.id}"]
+                    ?: byTitle[candidate.title.normalizedArtistLookupKey()]
+                    ?: candidate.copy(id = "navidrome:${candidate.id}")
+            }
+            .filter { candidate -> candidate.id != artist.id && !candidate.title.equals(artist.title, ignoreCase = true) }
+            .distinctBy { candidate -> candidate.id }
+            .take(ArtistSimilarArtistLimit)
+        val biography = info.biography
+        if (similar.isEmpty() && biography == null) return emptyList()
+        catalogMergeMutex.withLock {
+            val cur = mutableCatalog.value
+            var next = cur
+            if (similar.isNotEmpty() && cur.similarArtistsByArtist[artist.id] == null) {
+                next = next.copy(similarArtistsByArtist = next.similarArtistsByArtist + (artist.id to similar))
+            }
+            if (biography != null) {
+                next = next.copy(artistBiographyByArtist = next.artistBiographyByArtist + (artist.id to biography))
+            }
+            if (next !== cur) mutableCatalog.value = next
         }
         return similar
     }
@@ -4818,9 +4916,55 @@ class CatalogRepository(
                     if (tracks.isNotEmpty()) publishIndexedJellyfinTracks(tracks)
                 }
         }
+        if (session != null && session.isNavidrome() && artist.id.startsWith("navidrome:")) {
+            return navidromeArtistRadio(session, artist)
+        }
         val station = artistRadioStation(session, artist) ?: return emptyList()
         return playRadioStation(session, station)
     }
+
+    private suspend fun navidromeArtistRadio(session: PlexSession, artist: Artist): List<Track> {
+        val server = session.selectedServer ?: return emptyList()
+        val password = session.token.takeIf { it.isNotBlank() } ?: return emptyList()
+        val bareId = artist.id.removePrefix("navidrome:")
+        val catalogArtist = mutableCatalog.value.artists.firstOrNull { it.id == artist.id }
+        val tracks = subsonicClient.artistRadio(
+            server = server,
+            username = session.userName,
+            password = password,
+            // Artists derived from album tags get a synthetic id the server doesn't know; resolve those by name.
+            artistId = bareId.takeUnless { it.isSyntheticNavidromeArtistId() },
+            artistName = artist.title.ifBlank { catalogArtist?.title.orEmpty() },
+            genreHint = artist.genre ?: catalogArtist?.genre,
+        )
+        if (tracks.isNotEmpty()) publishIndexedProviderTracks("navidrome", tracks)
+        return tracks.map { it.withProviderPrefix("navidrome") }
+    }
+
+    /**
+     * Server-side song search for Subsonic servers (Navidrome / Octo). Results are returned only — never
+     * merged into the catalog — because Octo includes songs that aren't in the library yet.
+     */
+    suspend fun navidromeServerSearchTracks(session: PlexSession?, query: String): List<Track> {
+        val navidromeSession = session?.takeIf { it.isNavidrome() } ?: return emptyList()
+        val server = navidromeSession.selectedServer ?: return emptyList()
+        val password = navidromeSession.token.takeIf { it.isNotBlank() } ?: return emptyList()
+        return subsonicClient.searchSongs(server, navidromeSession.userName, password, query)
+            .map { it.withProviderPrefix("navidrome") }
+    }
+
+    /** Server-picked similar songs for an artist, album, or song ID (Navidrome `getSimilarSongs`). */
+    suspend fun navidromeSimilarTracksForItem(session: PlexSession?, itemId: String): List<Track> {
+        val navidromeSession = session?.takeIf { it.isNavidrome() } ?: return emptyList()
+        val bareId = providerItemId(itemId, "navidrome")?.takeUnless { it.isSyntheticNavidromeArtistId() } ?: return emptyList()
+        val server = navidromeSession.selectedServer ?: return emptyList()
+        val password = navidromeSession.token.takeIf { it.isNotBlank() } ?: return emptyList()
+        val tracks = subsonicClient.similarSongsForItem(server, navidromeSession.userName, password, bareId)
+        if (tracks.isNotEmpty()) publishIndexedProviderTracks("navidrome", tracks)
+        return tracks.map { it.withProviderPrefix("navidrome") }
+    }
+
+    private fun String.isSyntheticNavidromeArtistId(): Boolean = startsWith("artist:")
 
     suspend fun instantMixForItem(session: PlexSession?, itemId: String): List<Track> {
         val providerPrefix = session?.providerType?.catalogPrefix
@@ -4851,6 +4995,36 @@ class CatalogRepository(
         return tracks
     }
 
+    /**
+     * Server-picked tracks similar to [track] for a song radio. The seed itself is not included.
+     * Navidrome tops up thin `getSimilarSongs` results (no Last.fm agent) with the song's artist radio.
+     */
+    suspend fun songRadio(session: PlexSession?, track: Track): List<Track> {
+        val providerType = track.id.providerTypeFromCatalogId() ?: return emptyList()
+        if (session?.providerType != providerType) return emptyList()
+        val similar = when (providerType) {
+            MediaProviderType.Plex -> plexSimilarTracksForItem(session, track.id)
+            MediaProviderType.Jellyfin,
+            MediaProviderType.Emby -> instantMixForItem(session, track.id)
+            MediaProviderType.Navidrome -> navidromeSongRadio(session, track)
+            MediaProviderType.MusicAssistant -> emptyList()
+        }
+        return similar.filterNot { it.id == track.id }.distinctBy { it.id }
+    }
+
+    private suspend fun navidromeSongRadio(session: PlexSession, track: Track): List<Track> {
+        val similar = runCatching { navidromeSimilarTracksForItem(session, track.id) }
+            .onFailure { error -> PhoebeLog.d("CatalogRepository") { "Navidrome similar songs failed for ${track.id}: ${error.message}" } }
+            .getOrDefault(emptyList())
+        if (similar.size >= SongRadioMinSimilarTracks || track.artist.isBlank()) return similar
+        val catalogArtist = mutableCatalog.value.artists.firstOrNull {
+            it.id.startsWith("navidrome:") && it.title.equals(track.artist, ignoreCase = true)
+        }
+        // A synthetic "artist:" id makes navidromeArtistRadio resolve the artist by name on the server.
+        val artist = catalogArtist ?: Artist(id = "navidrome:artist:${track.artist}", title = track.artist, genre = track.genre)
+        return (similar + navidromeArtistRadio(session, artist)).distinctBy { it.id }
+    }
+
     suspend fun artistRadioStation(session: PlexSession?, artist: Artist): PlexRadioStation? {
         val providerPrefix = session?.providerType?.catalogPrefix
         if (session.isEmbyFamily() && providerPrefix != null && artist.id.startsWith("$providerPrefix:")) {
@@ -4858,6 +5032,18 @@ class CatalogRepository(
                 id = "$providerPrefix-artist-radio-${artist.id}",
                 title = "${artist.title} Radio",
                 subtitle = "${session.providerType.name} Instant Mix",
+                key = artist.id,
+                thumbUrl = artist.thumbUrl,
+                category = PlexRadioStationCategory.Artist,
+            )
+        }
+        if (session != null && session.isNavidrome() && artist.id.startsWith("navidrome:")) {
+            // No network probe: Navidrome radio falls back to the artist's own tracks plus same-genre picks
+            // when Last.fm similar songs are unavailable, so it is always offered for server artists.
+            return PlexRadioStation(
+                id = "navidrome-artist-radio-${artist.id}",
+                title = "${artist.title} Radio",
+                subtitle = "Navidrome similar songs",
                 key = artist.id,
                 thumbUrl = artist.thumbUrl,
                 category = PlexRadioStationCategory.Artist,
@@ -7700,6 +7886,10 @@ class CatalogRepository(
             dateAddedMs = dateAddedMs,
             rating = rating?.toFloat(),
             parentAlbumId = parentAlbumId,
+            replayGainTrackGainDb = replayGainTrackGainDb?.toFloat(),
+            replayGainTrackPeak = replayGainTrackPeak?.toFloat(),
+            replayGainAlbumGainDb = replayGainAlbumGainDb?.toFloat(),
+            replayGainAlbumPeak = replayGainAlbumPeak?.toFloat(),
         )
 
     private fun warmLikelyClickedContent(session: PlexSession?, snapshot: CatalogSnapshot) {
@@ -7863,6 +8053,10 @@ class CatalogRepository(
                         dateAddedMs = dateAddedMs,
                         rating = track.rating?.toDouble(),
                         parentAlbumId = track.parentAlbumId,
+                        replayGainTrackGainDb = track.replayGainTrackGainDb?.toDouble(),
+                        replayGainTrackPeak = track.replayGainTrackPeak?.toDouble(),
+                        replayGainAlbumGainDb = track.replayGainAlbumGainDb?.toDouble(),
+                        replayGainAlbumPeak = track.replayGainAlbumPeak?.toDouble(),
                     )
                     syncedTrackIdsDuringRefresh.add(track.id)
                 }
@@ -8162,6 +8356,10 @@ class CatalogRepository(
                     dateAddedMs = track.dateAddedMs,
                     rating = track.rating?.toDouble(),
                     parentAlbumId = track.parentAlbumId,
+                    replayGainTrackGainDb = track.replayGainTrackGainDb?.toDouble(),
+                    replayGainTrackPeak = track.replayGainTrackPeak?.toDouble(),
+                    replayGainAlbumGainDb = track.replayGainAlbumGainDb?.toDouble(),
+                    replayGainAlbumPeak = track.replayGainAlbumPeak?.toDouble(),
                 )
             }
             database.catalogQueries.deleteTrackParents(playlistId)
@@ -8226,6 +8424,10 @@ class CatalogRepository(
                     dateAddedMs = track.dateAddedMs,
                     rating = track.rating?.toDouble(),
                     parentAlbumId = track.parentAlbumId,
+                    replayGainTrackGainDb = track.replayGainTrackGainDb?.toDouble(),
+                    replayGainTrackPeak = track.replayGainTrackPeak?.toDouble(),
+                    replayGainAlbumGainDb = track.replayGainAlbumGainDb?.toDouble(),
+                    replayGainAlbumPeak = track.replayGainAlbumPeak?.toDouble(),
                 )
             }
             tracksByParent.forEach { (parentId, tracks) ->
@@ -8328,6 +8530,10 @@ class CatalogRepository(
             dateAddedMs = track.dateAddedMs,
             rating = track.rating?.toDouble(),
             parentAlbumId = track.parentAlbumId,
+            replayGainTrackGainDb = track.replayGainTrackGainDb?.toDouble(),
+            replayGainTrackPeak = track.replayGainTrackPeak?.toDouble(),
+            replayGainAlbumGainDb = track.replayGainAlbumGainDb?.toDouble(),
+            replayGainAlbumPeak = track.replayGainAlbumPeak?.toDouble(),
         )
     }
 
@@ -8443,6 +8649,10 @@ class CatalogRepository(
                     dateAddedMs = track.dateAddedMs,
                     rating = track.rating?.toDouble(),
                     parentAlbumId = track.parentAlbumId,
+                    replayGainTrackGainDb = track.replayGainTrackGainDb?.toDouble(),
+                    replayGainTrackPeak = track.replayGainTrackPeak?.toDouble(),
+                    replayGainAlbumGainDb = track.replayGainAlbumGainDb?.toDouble(),
+                    replayGainAlbumPeak = track.replayGainAlbumPeak?.toDouble(),
                 )
             }
             snapshot.tracksByParent.forEach { (parentId, tracks) ->
@@ -8833,6 +9043,7 @@ class CatalogRepository(
         const val DecadeFirstPageSize = 80
         const val DecadeTrackLimit = 500
         const val ArtistStationLookupTimeoutMs = 8_000L
+        const val SongRadioMinSimilarTracks = 10
         const val JellyfinQuickSyncPlaylistsTimeoutMs = 30_000L
         const val MaxDecadeTrackPages = 4
         const val CollectionFacetTrackPageSize = 250
@@ -8954,6 +9165,7 @@ private fun CatalogSnapshot.withoutProviderShell(prefix: String): CatalogSnapsho
         playlists = playlists.filterNot { it.id.startsWith(providerPrefix) },
         popularTracksByArtist = popularTracksByArtist.filterKeys { !it.startsWith(providerPrefix) },
         popularTracksByLibrary = popularTracksByLibrary.filterKeys { !it.startsWith(providerPrefix) },
+        artistBiographyByArtist = artistBiographyByArtist.filterKeys { !it.startsWith(providerPrefix) },
         collectionTags = collectionTags.filterNot { it.itemId.startsWith(providerPrefix) },
     )
 }

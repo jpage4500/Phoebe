@@ -134,6 +134,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.composed
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -158,6 +159,7 @@ import kotlin.math.roundToInt
 import com.phoebe.app.AppState
 import com.phoebe.app.PendingDuplicatePlaylistAdd
 import com.phoebe.app.PlaybackSnackbarNotice
+import com.phoebe.app.SongRadioUndo
 import com.phoebe.app.feature.auth.AuthWelcomeMobileRoute
 import com.phoebe.app.feature.auth.AuthWelcomeRouteActions
 import com.phoebe.app.feature.auth.AuthWelcomeRouteState
@@ -224,12 +226,15 @@ import com.phoebe.app.feature.playback.VisualizerPresetSentinel
 import com.phoebe.app.feature.playback.VisualizerSentinelBridge
 import com.phoebe.app.feature.search.LocalSearchHistory
 import com.phoebe.app.feature.search.LocalSavedSearchActions
+import com.phoebe.app.feature.search.LocalServerSearch
+import com.phoebe.app.feature.search.ServerSearchActions
 import com.phoebe.app.feature.search.SavedSearchActions
 import com.phoebe.app.feature.search.rememberSearchHistoryState
 import com.phoebe.app.feature.settings.DownloadManagerUiSummary
 import com.phoebe.app.feature.settings.SettingsCategory
 import com.phoebe.app.domain.ShellPlaybackState
 import com.phoebe.app.data.catalogAlbumsForArtist
+import com.phoebe.app.data.catalogArtistForAlbum
 import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.data.BackupRestoreMode
 import com.phoebe.app.data.PlayHistoryRankedEntries
@@ -284,6 +289,7 @@ import com.phoebe.app.domain.telemetryName
 import com.phoebe.app.domain.UpNextDividerMarker
 import com.phoebe.app.domain.providerTypeFromCatalogId
 import com.phoebe.app.player.CastState
+import com.phoebe.app.player.startingAtWithRestShuffled
 import com.phoebe.app.platform.createPlatformHttpClient
 import com.phoebe.app.platform.currentNetworkMeteringStatus
 import com.phoebe.app.platform.currentTimeMs
@@ -404,12 +410,14 @@ private fun PhoebeRootStateHolder(
     val cast by state.cast.collectAsState()
     val busy by state.busy.collectAsState()
     val authInProgress by state.authInProgress.collectAsState()
+    val signInError by state.signInError.collectAsState()
     val serversLoading by state.serversLoading.collectAsState()
     val librariesLoading by state.librariesLoading.collectAsState()
     val librariesLoadError by state.librariesLoadError.collectAsState()
     val message by state.message.collectAsState()
     val pendingDuplicatePlaylistAdd by state.pendingDuplicatePlaylistAdd.collectAsState()
     val playbackSnackbar by state.playbackSnackbar.collectAsState()
+    val songRadioUndo by state.songRadioUndo.collectAsState()
     val appUpdateState by state.appUpdateState.collectAsState()
     val pendingUpdateInstallConfirmation by state.pendingUpdateInstallConfirmation.collectAsState()
     val decadeMixNotice by state.decadeMixNotice.collectAsState()
@@ -573,6 +581,9 @@ private fun PhoebeRootStateHolder(
         when {
             currentRoute is PhoebeRoute.PlaylistDetail -> selectedPlaylistId = currentRoute.playlistId
             screen is AppScreen.PlaylistDetail -> selectedPlaylistId = screen.playlist.id
+            // navigator.open() can pop a playlist off the stack when it returns to an earlier route.
+            selectedPlaylistId != null && currentRoutes.none { it is PhoebeRoute.PlaylistDetail } ->
+                selectedPlaylistId = null
         }
     }
     val collapseMobilePlayer: () -> Unit = {
@@ -880,9 +891,10 @@ private fun PhoebeRootStateHolder(
     }
     val playTracks: (List<Track>, Int) -> Unit = { tracks, index ->
         val collectionMixSeed = navigator.routes.collectionMixSeed()
+        val shuffle = playerTransport.shuffle && tracks.size > 1
         state.playTracks(
-            tracks = tracks,
-            index = index,
+            tracks = if (shuffle) tracks.startingAtWithRestShuffled(index) else tracks,
+            index = if (shuffle) 0 else index,
             collectionMixSeed = collectionMixSeed,
             queueOrigin = playbackOriginForCurrentSurface(
                 screen = screen,
@@ -891,6 +903,7 @@ private fun PhoebeRootStateHolder(
                 tracks = tracks,
                 collectionMixSeed = collectionMixSeed,
             ),
+            shuffleEnabled = shuffle,
         )
     }
     val playAllTracks: (List<Track>) -> Unit = { tracks ->
@@ -989,7 +1002,23 @@ private fun PhoebeRootStateHolder(
         }
     }
     val playTracksFromMobile: (List<Track>, Int) -> Unit = { tracks, index ->
-        requestMobilePlayback(tracks, index)
+        // A lit shuffle button means "shuffle": play the tapped song, then the rest shuffled.
+        if (playerTransport.shuffle && tracks.size > 1) {
+            requestMobilePlayback(
+                tracks.startingAtWithRestShuffled(index),
+                0,
+                shuffleEnabled = true,
+                queueOrigin = playbackOriginForCurrentSurface(
+                    screen = screen,
+                    selectedPlaylistId = selectedPlaylistId,
+                    catalog = catalog,
+                    tracks = tracks,
+                    collectionMixSeed = navigator.routes.collectionMixSeed(),
+                ),
+            )
+        } else {
+            requestMobilePlayback(tracks, index)
+        }
     }
     val playAllTracksFromMobile: (List<Track>) -> Unit = { tracks ->
         requestMobilePlayback(tracks, 0, clearShuffle = true)
@@ -1360,6 +1389,12 @@ private fun PhoebeRootStateHolder(
             },
         )
     }
+    val songRadioActions = remember(state) {
+        SongRadioActions(
+            canStart = state::supportsSongRadio,
+            onStart = { track -> state.playSongRadio(track) },
+        )
+    }
     val metadataEditorActions = remember {
         MetadataEditorActions(onRequestEdit = { track -> metadataEditorTrack = track })
     }
@@ -1370,6 +1405,12 @@ private fun PhoebeRootStateHolder(
         )
     }
     val dragDrop = remember { DragDropController() }
+    val serverSearch = remember(state, sessionKey, session?.providerType) {
+        ServerSearchActions(
+            enabled = state.supportsServerSearch(),
+            searchTracks = { query -> state.serverSearchTracks(query) },
+        )
+    }
 
     CompositionLocalProvider(
         LocalCatalogHasContent provides catalogHasContent,
@@ -1389,10 +1430,12 @@ private fun PhoebeRootStateHolder(
         LocalFavoriteActions provides favoriteActions,
         LocalRatingActions provides ratingActions,
         LocalTrackNavigationActions provides trackNavigationActions,
+        LocalSongRadioActions provides songRadioActions,
         LocalMetadataEditorActions provides metadataEditorActions,
         LocalDragDrop provides dragDrop,
         LocalSearchHistory provides searchHistory,
         LocalSavedSearchActions provides savedSearchActions,
+        LocalServerSearch provides serverSearch,
         LocalVisualizerAudioAnalysis provides state.audioAnalysis,
     ) {
     if (showEventsDebugMenu && isDebugBuild()) {
@@ -1586,8 +1629,10 @@ private fun PhoebeRootStateHolder(
                             jellyfinDiscoveryLoading = jellyfinDiscoveryLoading,
                             jellyfinQuickConnect = jellyfinQuickConnect,
                             authInProgress = authInProgress,
+                            signInError = signInError,
                         ),
                         actions = AuthWelcomeRouteActions(
+                            onClearSignInError = state::clearSignInError,
                             onStartSignIn = state::startPlexSignIn,
                             onFinishSignIn = state::finishPlexSignIn,
                             onSignInJellyfin = state::signInJellyfin,
@@ -1701,13 +1746,18 @@ private fun PhoebeRootStateHolder(
                         )
                     }
                     is AppScreen.SongDetail -> SongDetailRoute(
-                        state = SongDetailRouteState(track = scr.track),
+                        state = SongDetailRouteState(
+                            track = scr.track,
+                            canStartRadio = state.supportsSongRadio(scr.track),
+                            radioStarting = scr.track.id in radioStartingIds,
+                        ),
                         actions = SongDetailRouteActions(
                             onBack = { navigator.pop() },
                             onPlay = { playTracksFromMobile(listOf(scr.track), 0) },
                             onAddToUpNext = state::addToUpNext,
                             onDownload = state::download,
                             onOpenLyrics = { navigator.open(PhoebeRoute.Lyrics(it.id)) },
+                            onStartRadio = { state.playSongRadio(it) },
                         ),
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -1907,6 +1957,8 @@ private fun PhoebeRootStateHolder(
                             onDeleteDownloadPlaylist = state::deleteDownloads,
                             onMovePlaylistTrack = state::movePlaylistTrack,
                             onLibraryColumns = state::setLibraryColumns,
+                            onPlayAllTracks = playAllTracksFromMobile,
+                            onShuffleAllTracks = shuffleAllTracksFromMobile,
                         ),
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -2005,9 +2057,6 @@ private fun PhoebeRootStateHolder(
                         onRecentSongs = openRecentSongs,
                         onRecentArtists = openRecentArtists,
                         onRecentAlbums = openRecentAlbums,
-                        onFavoritePlaylists = openFavoritePlaylists,
-                        onFavoriteArtists = openFavoriteArtists,
-                        onFavoriteAlbums = openFavoriteAlbums,
                         onRecentlyPlayed = openRecentlyPlayed,
                         onMostPlayed = openMostPlayed,
                         onCollections = openCollections,
@@ -2214,19 +2263,72 @@ private fun PhoebeRootStateHolder(
                         }
 
                         val scope = rememberCoroutineScope()
+                        // Swipe-down-to-dismiss for the collapsed mini player. The first drag delta
+                        // locks the gesture into either expanding the player or dismissing it.
+                        val miniPlayerDismissOffset = remember { Animatable(0f) }
+                        var miniPlayerDismissDragPx by remember { mutableFloatStateOf(0f) }
+                        var miniPlayerDragMode by remember { mutableStateOf(MiniPlayerDragMode.Expand) }
                         val onDragStart = {
                             scope.launch { playerExpansionFraction.stop() }
+                            val collapsed = playerExpansionFraction.value < 0.001f
+                            // Only a paused bar can be dismissed, so a stray swipe never cuts off playback.
+                            val paused = !shellPlayback.isPlaying && !shellPlayback.isBuffering && !mobilePlaybackStarting
+                            miniPlayerDragMode = if (collapsed && paused) MiniPlayerDragMode.Undecided else MiniPlayerDragMode.Expand
+                            miniPlayerDismissDragPx = 0f
                             Unit
                         }
                         val onDrag = { deltaY: Float ->
-                            val current = playerExpansionFraction.value
-                            val delta = -deltaY / dragRangePx
-                            scope.launch {
-                                playerExpansionFraction.snapTo((current + delta).coerceIn(0f, 1f))
+                            if (miniPlayerDragMode == MiniPlayerDragMode.Undecided) {
+                                miniPlayerDragMode = if (deltaY > 0f) MiniPlayerDragMode.Dismiss else MiniPlayerDragMode.Expand
+                            }
+                            if (miniPlayerDragMode == MiniPlayerDragMode.Dismiss) {
+                                val target = (miniPlayerDismissDragPx + deltaY).coerceIn(0f, miniPlayerHeightPx)
+                                miniPlayerDismissDragPx = target
+                                scope.launch { miniPlayerDismissOffset.snapTo(target) }
+                            } else {
+                                val current = playerExpansionFraction.value
+                                val delta = -deltaY / dragRangePx
+                                scope.launch {
+                                    playerExpansionFraction.snapTo((current + delta).coerceIn(0f, 1f))
+                                }
                             }
                             Unit
                         }
-                        val onDragEnd = { velocityY: Float ->
+                        val onMiniPlayerDismissEnd = { velocityY: Float ->
+                            val releaseOffset = miniPlayerDismissDragPx
+                            miniPlayerDismissDragPx = 0f
+                            miniPlayerDragMode = MiniPlayerDragMode.Expand
+                            val shouldDismiss = when {
+                                velocityY < -350f -> false
+                                velocityY > 800f -> true
+                                else -> releaseOffset > miniPlayerHeightPx * 0.5f
+                            }
+                            scope.launch {
+                                if (shouldDismiss) {
+                                    miniPlayerDismissOffset.animateTo(
+                                        targetValue = miniPlayerHeightPx,
+                                        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+                                    )
+                                    state.stopPlayback()
+                                    // Normally the bar leaves composition once the track clears; if a
+                                    // remote target keeps reporting a track, bring the bar back.
+                                    delay(500)
+                                    miniPlayerDismissOffset.snapTo(0f)
+                                } else {
+                                    miniPlayerDismissOffset.animateTo(
+                                        0f,
+                                        spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy),
+                                    )
+                                }
+                            }
+                            Unit
+                        }
+                        val onDragEnd = onDragEnd@{ velocityY: Float ->
+                            if (miniPlayerDragMode == MiniPlayerDragMode.Dismiss) {
+                                onMiniPlayerDismissEnd(velocityY)
+                                return@onDragEnd
+                            }
+                            miniPlayerDragMode = MiniPlayerDragMode.Expand
                             val current = playerExpansionFraction.value
                             val shouldExpand = when {
                                 velocityY < -350f -> true
@@ -2318,7 +2420,10 @@ private fun PhoebeRootStateHolder(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .graphicsLayer {
-                                    translationY = dragRangePx * (1f - playerExpansionFraction.value)
+                                    // A dismissing bar slides down behind the bottom nav (zIndex 5).
+                                    val dismissOffset = miniPlayerDismissOffset.value
+                                    translationY = dragRangePx * (1f - playerExpansionFraction.value) + dismissOffset
+                                    alpha = (1f - dismissOffset / miniPlayerHeightPx).coerceIn(0f, 1f)
                                 }
                                 .zIndex(4f)
                         )
@@ -2526,6 +2631,8 @@ private fun PhoebeRootStateHolder(
                         onDownloadArtist = state::download,
                         onProbeArtistRadio = state::probeArtistRadio,
                         onPlayArtistRadio = state::playArtistRadio,
+                        canStartSongRadio = state::supportsSongRadio,
+                        onPlaySongRadio = { state.playSongRadio(it) },
                         onLoadArtistEventAvailability = state::loadArtistEventAvailability,
                         onLoadArtistEvents = { artist -> state.loadArtistEvents(artist, force = true) },
                         onLoadAlbumMusicBrainzMetadata = state::loadAlbumMusicBrainzMetadata,
@@ -2588,7 +2695,7 @@ private fun PhoebeRootStateHolder(
                         settingsInitialCategory = if (browseSection == BrowseSection.Downloads) {
                             SettingsCategory.Downloads
                         } else {
-                            SettingsCategory.AudioPlayback
+                            SettingsCategory.Playback
                         },
                         listenBrainzCredentialAvailability = state.listenBrainzCredentialAvailability,
                         appUpdateState = appUpdateState,
@@ -2719,6 +2826,12 @@ private fun PhoebeRootStateHolder(
             onDismiss = state::dismissPlaybackSnackbar,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+        SongRadioUndoSnackbar(
+            undo = songRadioUndo,
+            onDismiss = state::dismissSongRadioUndo,
+            onUndo = state::undoSongRadio,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
         PlaylistDuplicateSnackbar(
             pendingAdd = pendingDuplicatePlaylistAdd,
             onDismiss = state::dismissDuplicatePlaylistAdd,
@@ -2780,6 +2893,7 @@ private fun PlaybackFailureSnackbar(
                 streamUrl != null -> "Copy URL"
                 else -> "Dismiss"
             },
+            onDismiss = onDismiss,
             onAction = {
                 if (streamUrl == null) {
                     onDismiss()
@@ -2789,6 +2903,43 @@ private fun PlaybackFailureSnackbar(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun SongRadioUndoSnackbar(
+    undo: SongRadioUndo?,
+    onDismiss: () -> Unit,
+    onUndo: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LaunchedEffect(undo) {
+        if (undo != null) {
+            delay(8_000L)
+            onDismiss()
+        }
+    }
+    var lastUndo by remember { mutableStateOf<SongRadioUndo?>(null) }
+    if (undo != null) {
+        lastUndo = undo
+    }
+    AnimatedVisibility(
+        visible = undo != null,
+        enter = slideInVertically(tween(180, easing = FastOutSlowInEasing)) { it / 2 } + fadeIn(tween(180)),
+        exit = slideOutVertically(tween(160, easing = FastOutSlowInEasing)) { it / 2 } + fadeOut(tween(160)),
+        modifier = modifier
+            .navigationBarsPadding()
+            .padding(horizontal = 18.dp, vertical = 18.dp)
+            .zIndex(21f),
+    ) {
+        lastUndo?.let { shown ->
+            PhoebeActionSnackbar(
+                message = shown.message,
+                actionLabel = "Undo",
+                onAction = onUndo,
+                onDismiss = onDismiss,
+            )
+        }
     }
 }
 
@@ -2826,6 +2977,7 @@ private fun PlaylistDuplicateSnackbar(
                 onAction = {
                     onMoveToTop(currentPending)
                 },
+                onDismiss = onDismiss,
             )
         }
     }
@@ -2836,14 +2988,47 @@ private fun PhoebeActionSnackbar(
     message: String,
     actionLabel: String,
     onAction: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
+    // Swipe left/right to dismiss. Past ~35% of the width (or a fast fling) it flies off and
+    // dismisses; otherwise it springs back.
+    val scope = rememberCoroutineScope()
+    val offsetX = remember { Animatable(0f) }
+    var widthPx by remember { mutableStateOf(0) }
+    LaunchedEffect(message) { offsetX.snapTo(0f) }
+    val dragState = rememberDraggableState { delta ->
+        scope.launch { offsetX.snapTo(offsetX.value + delta) }
+    }
     Surface(
         color = PhoebeUi.panel.copy(alpha = 0.96f),
         contentColor = PhoebeUi.primaryText,
         shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, PhoebeUi.border),
         shadowElevation = 12.dp,
-        modifier = Modifier.widthIn(max = 520.dp),
+        modifier = Modifier
+            .widthIn(max = 520.dp)
+            .onSizeChanged { widthPx = it.width }
+            .graphicsLayer {
+                translationX = offsetX.value
+                alpha = if (widthPx > 0) (1f - abs(offsetX.value) / widthPx).coerceIn(0f, 1f) else 1f
+            }
+            .draggable(
+                state = dragState,
+                orientation = Orientation.Horizontal,
+                onDragStopped = { velocity ->
+                    val width = widthPx.toFloat().coerceAtLeast(1f)
+                    val offset = offsetX.value
+                    val flung = abs(velocity) > 1_000f && (offset == 0f || velocity * offset > 0f)
+                    if (abs(offset) > width * 0.35f || flung) {
+                        val direction = if (offset != 0f) offset else velocity
+                        val target = if (direction > 0f) width * 1.2f else -width * 1.2f
+                        offsetX.animateTo(target, tween(140))
+                        onDismiss()
+                    } else {
+                        offsetX.animateTo(0f, spring())
+                    }
+                },
+            ),
     ) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -3061,6 +3246,7 @@ private fun MobilePlayerHost(
     val equalizerProfile by appState.equalizerProfile.collectAsState()
     val equalizerRemoteUnavailable by appState.equalizerRemoteUnavailable.collectAsState()
     val listenBrainzFeedbackTarget by appState.listenBrainzFeedbackTarget.collectAsState()
+    val radioStartingIds by appState.radioStartingIds.collectAsState()
     val showStartingState = playbackStarting && track?.id != player.currentTrackId
     MobilePlaybackRoute(
         state = MobilePlaybackRouteState(
@@ -3091,6 +3277,7 @@ private fun MobilePlayerHost(
             effectiveStreamingQuality = appSettings.streamingPolicy.effectiveQuality(
                 currentNetworkMeteringStatus().let { it.isMetered || it.isCellular },
             ),
+            songRadioStartingIds = radioStartingIds,
         ),
         actions = MobilePlaybackRouteActions(
             onToggle = onToggle,
@@ -3105,6 +3292,8 @@ private fun MobilePlayerHost(
             onMoveUpNext = onMoveUpNext,
             onRemoveUpNext = onRemoveUpNext,
             onOpenSongDetail = onOpenSongDetail,
+            canStartSongRadio = appState::supportsSongRadio,
+            onStartSongRadio = { appState.playSongRadio(it) },
             onCast = onCast,
             onLyrics = onLyrics,
             onUltimateGuitar = onUltimateGuitar,
@@ -3147,15 +3336,22 @@ private fun Track?.withRadioNowPlaying(metadata: RadioNowPlayingMetadata?): Trac
 private fun resolveArtistForTrack(catalog: CatalogSnapshot, track: Track): Artist? {
     val title = track.artist.trim()
     if (title.isBlank()) return null
-    return catalog.artists.firstOrNull { it.title.equals(title, ignoreCase = true) }
-        ?: resolveAlbumForTrack(catalog, track)?.let { album ->
-            catalog.artists.firstOrNull { it.title.equals(album.artist, ignoreCase = true) }
-        }
-        ?: catalog.artists.firstOrNull { artist ->
-            catalogAlbumsForArtist(catalog, artist.title).any { album ->
-                album.title.equals(track.album, ignoreCase = true)
-            }
-        }
+    catalog.artists.firstOrNull { it.title.equals(title, ignoreCase = true) }?.let { return it }
+    resolveAlbumForTrack(catalog, track)?.let { album ->
+        catalog.artists.firstOrNull { it.title.equals(album.artist, ignoreCase = true) }?.let { return it }
+        catalogArtistForAlbum(catalog, album)?.let { return it }
+    }
+    val albumTitle = track.album.trim()
+    if (albumTitle.isBlank()) return null
+    // Match albums to artists in a single album pass. The previous shape asked
+    // `catalogAlbumsForArtist` once per artist, which is O(artists × albums) on the
+    // main thread and ANR'd on large catalogs when opening an artist from the player.
+    for (album in catalog.albums) {
+        if (!album.title.equals(albumTitle, ignoreCase = true)) continue
+        catalog.artists.firstOrNull { it.title.equals(album.artist, ignoreCase = true) }?.let { return it }
+        catalogArtistForAlbum(catalog, album)?.let { return it }
+    }
+    return null
 }
 
 private fun resolveAlbumForTrack(catalog: CatalogSnapshot, track: Track): Album? {
@@ -3236,3 +3432,5 @@ private fun List<DownloadItem>.toDownloadManagerUiSummary(activeDownloadJobCount
         failed = count { it.state == DownloadState.Failed },
         estimatedBytes = filter { it.state == DownloadState.Complete }.sumOf { it.downloadedBytes },
     )
+
+private enum class MiniPlayerDragMode { Undecided, Expand, Dismiss }

@@ -58,7 +58,7 @@ class ProviderArtistDetailPreloadDesktopTest {
             mediaSourcesRepository = MediaSourcesRepository(db, PlatformStorage()),
         )
 
-        listOf(MediaProviderType.Jellyfin, MediaProviderType.Emby, MediaProviderType.Navidrome).forEach { provider ->
+        listOf(MediaProviderType.Jellyfin, MediaProviderType.Emby).forEach { provider ->
             val prefix = provider.catalogPrefix
             val session = PlexSession(
                 token = "token",
