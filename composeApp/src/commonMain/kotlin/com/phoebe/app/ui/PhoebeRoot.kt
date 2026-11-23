@@ -1370,6 +1370,12 @@ private fun PhoebeRootStateHolder(
             onTogglePlaylist = { playlist -> state.toggleFavoritePlaylist(playlist) },
         )
     }
+    val shuffleActions = remember(state) {
+        ShuffleActions(
+            onShuffleArtist = { artist -> state.playArtistShuffled(artist) },
+            onShuffleAlbum = { album -> state.playAlbumShuffled(album) },
+        )
+    }
     val trackNavigationActions = remember(catalog, state) {
         TrackNavigationActions(
             onOpenArtistForTrack = { track ->
@@ -1428,6 +1434,7 @@ private fun PhoebeRootStateHolder(
         LocalPlaylistActions provides playlistActions,
         LocalLikeActions provides likeActions,
         LocalFavoriteActions provides favoriteActions,
+        LocalShuffleActions provides shuffleActions,
         LocalRatingActions provides ratingActions,
         LocalTrackNavigationActions provides trackNavigationActions,
         LocalSongRadioActions provides songRadioActions,
