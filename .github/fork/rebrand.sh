@@ -50,6 +50,12 @@ replace core/platform/src/commonMain/kotlin/com/phoebe/app/platform/StorageNames
   'else ".phoebe"' \
   "else \"${FORK_DATA_DIR}\""
 
+# Telemetry: the Sentry DSN is upstream's project, so fork builds must not report to it.
+# An empty DSN makes the Sentry SDK disable itself on every platform.
+replace core/platform/src/commonMain/kotlin/com/phoebe/app/telemetry/Telemetry.kt \
+  '"https://86de8cb5898a6e529bb04cef2cad8677@o4511214016200704.ingest.us.sentry.io/4511412309524480"' \
+  '""'
+
 # In-app update check: look at this fork's releases, not upstream's.
 replace core/platform/build.gradle.kts \
   '"j-roskopf"' \
