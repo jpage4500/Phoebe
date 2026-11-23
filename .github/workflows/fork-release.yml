@@ -1,0 +1,415 @@
+name: Fork Release
+
+# Fork-only release: builds Android + desktop clients and publishes them to this
+# repo's GitHub Releases whenever a pull request is merged into main.
+#
+# Upstream's workflows (release.yml, pr-checks.yml, ...) are disabled in this fork's
+# Actions settings instead of being edited, so syncing from upstream stays conflict-free.
+#
+# Optional secrets:
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+#     Without them the APK is signed with the runner's throwaway debug key, so each
+#     release will NOT install over the previous one.
+#   PHOEBE_GOOGLE_MAPS_ANDROID_API_KEY, PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY
+#     Without them map views are blank; everything else works.
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: fork-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  JAVA_VERSION: 21
+  JAVA_DISTRIBUTION: temurin
+  BUILD_REF: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+  FORK_APPLICATION_ID: com.phoebe.app.fork
+  FORK_APP_NAME: Phoebe Fork
+
+jobs:
+  version:
+    name: Compute version
+    # Never run in upstream if this file ever lands there, and only for merged PRs.
+    if: >-
+      github.repository == 'jpage4500/Phoebe' &&
+      (github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      version_code: ${{ steps.version.outputs.version_code }}
+      tag_name: ${{ steps.version.outputs.tag_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BUILD_REF }}
+
+      - name: Compute version
+        id: version
+        shell: bash
+        run: |
+          base_code="$(grep '^phoebe.versionCode=' gradle.properties | cut -d'=' -f2- | tr -d '[:space:]')"
+          if [[ -z "${base_code}" ]]; then
+            echo "::error::gradle.properties must define phoebe.versionCode"
+            exit 1
+          fi
+          # Upstream's versionCode only goes up and so does run_number, so the sum keeps
+          # increasing and each APK can install over the last one.
+          version_code=$((base_code + GITHUB_RUN_NUMBER))
+          version="$(date -u +"%Y.%m%d.%H%M")"
+          {
+            echo "version=${version}"
+            echo "version_code=${version_code}"
+            echo "tag_name=fork/${version}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "Version ${version} (code ${version_code})"
+
+  android:
+    name: Android
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      PHOEBE_GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.PHOEBE_GOOGLE_MAPS_ANDROID_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BUILD_REF }}
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install projectM build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27c
+
+      - name: Build projectM for Android ABIs
+        shell: bash
+        env:
+          ANDROID_NDK: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            ./scripts/build-projectm.sh "android-${abi}"
+          done
+
+      # Give the fork its own package id + launcher label so it installs alongside
+      # upstream's com.phoebe.app. Done here (not in source) to keep upstream PRs clean.
+      # Don't change FORK_APPLICATION_ID after people install it — it breaks updates.
+      - name: Rebrand Android app for the fork
+        shell: bash
+        run: |
+          gradle_file=androidApp/build.gradle.kts
+          if ! grep -q 'applicationId = "com.phoebe.app"' "${gradle_file}"; then
+            echo "::error::applicationId line changed upstream; update the fork rebrand step"
+            exit 1
+          fi
+          sed -i "s/applicationId = \"com.phoebe.app\"/applicationId = \"${FORK_APPLICATION_ID}\"/" "${gradle_file}"
+          mkdir -p androidApp/src/release/res/values
+          cat > androidApp/src/release/res/values/strings.xml <<EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">${FORK_APP_NAME}</string>
+          </resources>
+          EOF
+          grep -n applicationId "${gradle_file}"
+
+      - name: Configure Android signing
+        shell: bash
+        run: |
+          if [[ -z "${ANDROID_KEYSTORE_BASE64}" || -z "${ANDROID_KEYSTORE_PASSWORD}" || -z "${ANDROID_KEY_ALIAS}" || -z "${ANDROID_KEY_PASSWORD}" ]]; then
+            echo "::warning::Android signing secrets are not set; the APK is signed with a throwaway debug key and will not install over earlier releases."
+            exit 0
+          fi
+          keystore_path="${RUNNER_TEMP}/phoebe-release.jks"
+          echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${keystore_path}"
+          {
+            echo "PHOEBE_ANDROID_SIGNING_STORE_FILE=${keystore_path}"
+            echo "PHOEBE_ANDROID_SIGNING_STORE_PASSWORD=${ANDROID_KEYSTORE_PASSWORD}"
+            echo "PHOEBE_ANDROID_SIGNING_KEY_ALIAS=${ANDROID_KEY_ALIAS}"
+            echo "PHOEBE_ANDROID_SIGNING_KEY_PASSWORD=${ANDROID_KEY_PASSWORD}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Build Android APK
+        run: >
+          ./gradlew
+          :androidApp:assembleRelease
+          -Pphoebe.versionName=${{ needs.version.outputs.version }}
+          -Pphoebe.versionCode=${{ needs.version.outputs.version_code }}
+
+      - name: Collect APK
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          mkdir -p release-artifacts
+          apk="$(find androidApp/build/outputs/apk/release -name '*.apk' -print -quit)"
+          if [[ -z "${apk}" ]]; then
+            echo "::error::Could not find the release APK"
+            exit 1
+          fi
+          cp "${apk}" "release-artifacts/Phoebe-${VERSION}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          if-no-files-found: error
+          path: release-artifacts/*
+
+  macos:
+    name: macOS
+    needs: version
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY: ${{ secrets.PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BUILD_REF }}
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install projectM build deps
+        run: brew install cmake glm
+
+      - name: Build projectM
+        run: ./scripts/build-projectm.sh macos-arm64
+
+      # Unsigned and not notarized: after installing, run
+      #   xattr -dr com.apple.quarantine /Applications/Phoebe.app
+      # or allow it under System Settings > Privacy & Security.
+      - name: Build DMG
+        run: >
+          ./gradlew
+          :composeApp:packageReleaseDmg
+          -Pphoebe.versionName=${{ needs.version.outputs.version }}
+
+      - name: Print packaging logs
+        if: failure()
+        shell: bash
+        run: |
+          find composeApp/build/compose/logs -type f -name 'jpackage-*.txt' 2>/dev/null | sort | while read -r f; do
+            echo "::group::${f}"; sed -n '1,240p' "${f}"; echo "::endgroup::"
+          done
+
+      - name: Collect DMG
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          mkdir -p release-artifacts
+          dmg="$(find composeApp/build -name '*.dmg' -print -quit)"
+          if [[ -z "${dmg}" ]]; then
+            echo "::error::Could not find the DMG"
+            exit 1
+          fi
+          cp "${dmg}" "release-artifacts/Phoebe-${VERSION}-macos-arm64.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          if-no-files-found: error
+          path: release-artifacts/*
+
+  windows:
+    name: Windows
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY: ${{ secrets.PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BUILD_REF }}
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install projectM build deps
+        shell: pwsh
+        run: |
+          & "${env:VCPKG_INSTALLATION_ROOT}\vcpkg.exe" install glew:x64-windows
+
+      - name: Build projectM
+        shell: bash
+        run: ./scripts/build-projectm.sh windows-x64
+
+      # Unsigned: Windows SmartScreen will warn on first launch ("More info" > "Run anyway").
+      - name: Build MSI
+        shell: pwsh
+        run: >
+          ./gradlew
+          :composeApp:packageReleaseMsi
+          "-Pphoebe.versionName=${{ needs.version.outputs.version }}"
+
+      - name: Collect MSI
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          New-Item -ItemType Directory -Force -Path "release-artifacts" | Out-Null
+          $msi = Get-ChildItem -Path "composeApp/build" -Recurse -Filter "*.msi" | Select-Object -First 1
+          if (-not $msi) { throw "Could not find the MSI" }
+          Copy-Item $msi.FullName "release-artifacts/Phoebe-${env:VERSION}.msi"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          if-no-files-found: error
+          path: release-artifacts/*
+
+  linux:
+    name: Linux
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY: ${{ secrets.PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BUILD_REF }}
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fakeroot cmake ninja-build libgl1-mesa-dev libglm-dev
+
+      - name: Build projectM
+        run: ./scripts/build-projectm.sh linux-x64
+
+      - name: Build DEB
+        run: >
+          ./gradlew
+          :composeApp:packageReleaseDeb
+          -Pphoebe.versionName=${{ needs.version.outputs.version }}
+
+      - name: Collect DEB
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          mkdir -p release-artifacts
+          deb="$(find composeApp/build -name '*.deb' -print -quit)"
+          if [[ -z "${deb}" ]]; then
+            echo "::error::Could not find the DEB"
+            exit 1
+          fi
+          cp "${deb}" "release-artifacts/Phoebe-${VERSION}.deb"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          if-no-files-found: error
+          path: release-artifacts/*
+
+  release:
+    name: Publish GitHub release
+    needs:
+      - version
+      - android
+      - macos
+      - windows
+      - linux
+    # Publish whatever platforms built, so one flaky desktop runner doesn't block the APK.
+    if: always() && needs.version.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Create release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag_name }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          RESULTS: >-
+            Android: ${{ needs.android.result }},
+            macOS: ${{ needs.macos.result }},
+            Windows: ${{ needs.windows.result }},
+            Linux: ${{ needs.linux.result }}
+        run: |
+          shopt -s nullglob
+          files=(release-artifacts/*)
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No platform built successfully; nothing to release"
+            exit 1
+          fi
+          {
+            if [[ -n "${PR_NUMBER}" ]]; then
+              echo "Built from #${PR_NUMBER}: ${PR_TITLE}"
+            else
+              echo "Manual build of ${BUILD_REF}"
+            fi
+            echo
+            echo "Builds: ${RESULTS}"
+            echo
+            echo "Desktop builds are unsigned. macOS: after installing, run \`xattr -dr com.apple.quarantine /Applications/Phoebe.app\`. Windows: SmartScreen > More info > Run anyway."
+          } > notes.md
+          gh release create "${TAG}" "${files[@]}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${BUILD_REF}" \
+            --title "Phoebe ${VERSION}" \
+            --notes-file notes.md \
+            --latest
