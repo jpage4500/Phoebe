@@ -1373,14 +1373,6 @@ private fun MobilePlaylistDetailHeader(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.sharedBoundsTransition("playlist:${playlist.id}:title"),
                 )
-                Text(
-                    playlistCuratorLine(playlist),
-                    color = PhoebeUi.secondaryText,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1493,13 +1485,6 @@ private fun MobilePlaylistDetailTopBar(
             }
         }
     }
-}
-
-private fun playlistCuratorLine(playlist: Playlist): String {
-    val source = playlist.id.substringBefore(':', missingDelimiterValue = "")
-        .takeIf { it.isNotBlank() }
-        ?.replaceFirstChar { char -> char.uppercaseChar() }
-    return source?.let { "Curated by $it" } ?: "Curated playlist"
 }
 
 private fun playlistRatingLabel(rating: Float): String {
