@@ -7,7 +7,8 @@ name: Fork Release
 # Actions settings instead of being edited, so syncing from upstream stays conflict-free.
 #
 # Optional secrets:
-#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+#   KMP_KEYSTORE (base64 of the .jks/.keystore file), KMP_SIGNING_STORE_PASSWORD,
+#   KMP_SIGNING_KEY_ALIAS, KMP_SIGNING_KEY_PASSWORD
 #     Without them the APK is signed with the runner's throwaway debug key, so each
 #     release will NOT install over the previous one.
 #   PHOEBE_GOOGLE_MAPS_ANDROID_API_KEY, PHOEBE_GOOGLE_MAPS_DESKTOP_API_KEY
@@ -32,8 +33,14 @@ env:
   JAVA_VERSION: 21
   JAVA_DISTRIBUTION: temurin
   BUILD_REF: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
-  FORK_APPLICATION_ID: com.phoebe.app.fork
+  # Fork identity, applied by .github/fork/rebrand.sh in every build job so the apps
+  # install and keep their data alongside upstream Phoebe. Don't change these after
+  # people have installed a release.
   FORK_APP_NAME: Phoebe+
+  FORK_APPLICATION_ID: com.phoebe.app.fork
+  FORK_UPGRADE_UUID: FD8339D3-0751-4AE8-B939-74821778C38E
+  FORK_DATA_DIR: .phoebe-plus
+  FORK_GITHUB_OWNER: ${{ github.repository_owner }}
 
 jobs:
   version:
@@ -70,7 +77,8 @@ jobs:
           {
             echo "version=${version}"
             echo "version_code=${version_code}"
-            echo "tag_name=fork/${version}"
+            # The in-app updater only parses "v1.2.3" / "release/1.2.3" tags.
+            echo "tag_name=v${version}"
           } >> "${GITHUB_OUTPUT}"
           echo "Version ${version} (code ${version_code})"
 
@@ -80,10 +88,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      KMP_KEYSTORE: ${{ secrets.KMP_KEYSTORE }}
+      KMP_SIGNING_STORE_PASSWORD: ${{ secrets.KMP_SIGNING_STORE_PASSWORD }}
+      KMP_SIGNING_KEY_ALIAS: ${{ secrets.KMP_SIGNING_KEY_ALIAS }}
+      KMP_SIGNING_KEY_PASSWORD: ${{ secrets.KMP_SIGNING_KEY_PASSWORD }}
       PHOEBE_GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.PHOEBE_GOOGLE_MAPS_ANDROID_API_KEY }}
     steps:
       - name: Checkout
@@ -99,6 +107,10 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Rebrand as Phoebe+
+        shell: bash
+        run: ./.github/fork/rebrand.sh
 
       - name: Install projectM build deps
         run: |
@@ -120,41 +132,20 @@ jobs:
             ./scripts/build-projectm.sh "android-${abi}"
           done
 
-      # Give the fork its own package id + launcher label so it installs alongside
-      # upstream's com.phoebe.app. Done here (not in source) to keep upstream PRs clean.
-      # Don't change FORK_APPLICATION_ID after people install it — it breaks updates.
-      - name: Rebrand Android app for the fork
-        shell: bash
-        run: |
-          gradle_file=androidApp/build.gradle.kts
-          if ! grep -q 'applicationId = "com.phoebe.app"' "${gradle_file}"; then
-            echo "::error::applicationId line changed upstream; update the fork rebrand step"
-            exit 1
-          fi
-          sed -i "s/applicationId = \"com.phoebe.app\"/applicationId = \"${FORK_APPLICATION_ID}\"/" "${gradle_file}"
-          mkdir -p androidApp/src/release/res/values
-          cat > androidApp/src/release/res/values/strings.xml <<EOF
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <string name="app_name">${FORK_APP_NAME}</string>
-          </resources>
-          EOF
-          grep -n applicationId "${gradle_file}"
-
       - name: Configure Android signing
         shell: bash
         run: |
-          if [[ -z "${ANDROID_KEYSTORE_BASE64}" || -z "${ANDROID_KEYSTORE_PASSWORD}" || -z "${ANDROID_KEY_ALIAS}" || -z "${ANDROID_KEY_PASSWORD}" ]]; then
+          if [[ -z "${KMP_KEYSTORE}" || -z "${KMP_SIGNING_STORE_PASSWORD}" || -z "${KMP_SIGNING_KEY_ALIAS}" || -z "${KMP_SIGNING_KEY_PASSWORD}" ]]; then
             echo "::warning::Android signing secrets are not set; the APK is signed with a throwaway debug key and will not install over earlier releases."
             exit 0
           fi
           keystore_path="${RUNNER_TEMP}/phoebe-release.jks"
-          echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${keystore_path}"
+          echo "${KMP_KEYSTORE}" | base64 --decode > "${keystore_path}"
           {
             echo "PHOEBE_ANDROID_SIGNING_STORE_FILE=${keystore_path}"
-            echo "PHOEBE_ANDROID_SIGNING_STORE_PASSWORD=${ANDROID_KEYSTORE_PASSWORD}"
-            echo "PHOEBE_ANDROID_SIGNING_KEY_ALIAS=${ANDROID_KEY_ALIAS}"
-            echo "PHOEBE_ANDROID_SIGNING_KEY_PASSWORD=${ANDROID_KEY_PASSWORD}"
+            echo "PHOEBE_ANDROID_SIGNING_STORE_PASSWORD=${KMP_SIGNING_STORE_PASSWORD}"
+            echo "PHOEBE_ANDROID_SIGNING_KEY_ALIAS=${KMP_SIGNING_KEY_ALIAS}"
+            echo "PHOEBE_ANDROID_SIGNING_KEY_PASSWORD=${KMP_SIGNING_KEY_PASSWORD}"
           } >> "${GITHUB_ENV}"
 
       - name: Build Android APK
@@ -205,6 +196,10 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Rebrand as Phoebe+
+        shell: bash
+        run: ./.github/fork/rebrand.sh
+
       - name: Install projectM build deps
         run: brew install cmake glm
 
@@ -212,7 +207,7 @@ jobs:
         run: ./scripts/build-projectm.sh macos-arm64
 
       # Unsigned and not notarized: after installing, run
-      #   xattr -dr com.apple.quarantine /Applications/Phoebe.app
+      #   xattr -dr com.apple.quarantine /Applications/Phoebe+.app
       # or allow it under System Settings > Privacy & Security.
       - name: Build DMG
         run: >
@@ -269,6 +264,10 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Rebrand as Phoebe+
+        shell: bash
+        run: ./.github/fork/rebrand.sh
+
       - name: Install projectM build deps
         shell: pwsh
         run: |
@@ -323,6 +322,10 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Rebrand as Phoebe+
+        shell: bash
+        run: ./.github/fork/rebrand.sh
 
       - name: Install build deps
         run: |
@@ -405,11 +408,11 @@ jobs:
             echo
             echo "Builds: ${RESULTS}"
             echo
-            echo "Desktop builds are unsigned. macOS: after installing, run \`xattr -dr com.apple.quarantine /Applications/Phoebe.app\`. Windows: SmartScreen > More info > Run anyway."
+            echo "Desktop builds are unsigned. macOS: after installing, run \`xattr -dr com.apple.quarantine /Applications/Phoebe+.app\`. Windows: SmartScreen > More info > Run anyway."
           } > notes.md
           gh release create "${TAG}" "${files[@]}" \
             --repo "${GITHUB_REPOSITORY}" \
             --target "${BUILD_REF}" \
-            --title "Phoebe ${VERSION}" \
+            --title "Phoebe+ ${VERSION}" \
             --notes-file notes.md \
             --latest
