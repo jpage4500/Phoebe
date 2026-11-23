@@ -1227,6 +1227,7 @@ private fun MobileAlbumDetailHeader(
     favoriteActions: FavoriteActions,
     onBack: () -> Unit,
     onPlayTracks: (List<Track>, Int) -> Unit,
+    onShuffleAllTracks: (List<Track>) -> Unit,
     onDownloadAlbum: (Album) -> Unit,
     onArtist: (Artist) -> Unit,
     onArtworkLongClick: () -> Unit,
@@ -1301,6 +1302,7 @@ private fun MobileAlbumDetailHeader(
                     enabled = visibleTracks.isNotEmpty(),
                     modifier = Modifier.weight(1f),
                     onClick = { onPlayTracks(visibleTracks, 0) },
+                    onLongClick = { onShuffleAllTracks(visibleTracks) },
                 )
                 MobileDetailIconSurface {
                     DownloadActionButton("Download", tracks, iconOnly = true) { onDownloadAlbum(album) }
@@ -1615,6 +1617,7 @@ private fun DesktopAlbumDetailHeader(
     favoriteActions: FavoriteActions,
     onBack: () -> Unit,
     onPlayTracks: (List<Track>, Int) -> Unit,
+    onShuffleAllTracks: (List<Track>) -> Unit,
     onDownloadAlbum: (Album) -> Unit,
     onArtist: (Artist) -> Unit,
     onArtworkClick: () -> Unit,
@@ -1684,6 +1687,7 @@ private fun DesktopAlbumDetailHeader(
             PlayAllActionButton(
                 tracks = visibleTracks,
                 onClick = { onPlayTracks(visibleTracks, 0) },
+                onLongClick = { onShuffleAllTracks(visibleTracks) },
             )
             DownloadActionButton("Download", tracks) { onDownloadAlbum(album) }
             DesktopDetailIconSurface {
@@ -3848,6 +3852,7 @@ fun AlbumDetailPanel(
     onSearchQuery: (String) -> Unit = {},
     onBack: () -> Unit,
     onPlayTracks: (List<Track>, Int) -> Unit,
+    onShuffleAllTracks: (List<Track>) -> Unit = { tracksToShuffle -> onPlayTracks(tracksToShuffle.shuffled(), 0) },
     onAddToUpNext: (Track) -> Unit,
     onDownload: (Track) -> Unit,
     onDownloadAlbum: (Album) -> Unit,
@@ -3960,6 +3965,7 @@ fun AlbumDetailPanel(
                         favoriteActions = LocalFavoriteActions.current,
                         onBack = onBack,
                         onPlayTracks = onPlayTracks,
+                        onShuffleAllTracks = onShuffleAllTracks,
                         onDownloadAlbum = onDownloadAlbum,
                         onArtist = onArtist,
                         onArtworkClick = { showArtworkGallery = true },
@@ -3997,6 +4003,7 @@ fun AlbumDetailPanel(
                         favoriteActions = LocalFavoriteActions.current,
                         onBack = onBack,
                         onPlayTracks = onPlayTracks,
+                        onShuffleAllTracks = onShuffleAllTracks,
                         onDownloadAlbum = onDownloadAlbum,
                         onArtist = onArtist,
                         onArtworkLongClick = { showArtworkGallery = true },

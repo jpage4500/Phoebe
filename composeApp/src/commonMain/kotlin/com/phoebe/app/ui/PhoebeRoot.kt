@@ -1741,6 +1741,7 @@ private fun PhoebeRootStateHolder(
                             actions = AlbumDetailRouteActions(
                                 onBack = { navigator.pop() },
                                 onPlayTracks = playTracksFromMobile,
+                                onShuffleAllTracks = shuffleAllTracksFromMobile,
                                 onAddToUpNext = state::addToUpNext,
                                 onDownload = state::download,
                                 onAddToEndOfQueue = state::addToEndOfQueue,
