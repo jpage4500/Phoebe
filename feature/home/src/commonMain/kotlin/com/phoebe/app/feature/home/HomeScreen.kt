@@ -1348,7 +1348,8 @@ private fun ExpandedFavoritePlaylistsShelf(
             items(displayPlaylists, key = { "favorite-playlist:${it.id}" }, contentType = { "expanded-favorite-playlist" }) { playlist ->
                 FavoritePlaylistTile(
                     playlist = playlist,
-                    modifier = Modifier.width(214.dp),
+                    modifier = Modifier.width(92.dp),
+                    maxDecodeDimension = 180,
                     onLongClick = { playlistActions.onShufflePlaylist(playlist) },
                 ) {
                     onPlaylist(playlist)
@@ -2283,7 +2284,8 @@ private fun MobileFavoritePlaylistsSection(
             items(visiblePlaylists, key = { it.id }, contentType = { "mobile-favorite-playlist" }) { playlist ->
                 FavoritePlaylistTile(
                     playlist = playlist,
-                    modifier = Modifier.width(240.dp),
+                    modifier = Modifier.width(92.dp),
+                    maxDecodeDimension = 180,
                     onLongClick = { playlistActions.onShufflePlaylist(playlist) },
                 ) {
                     onPlaylist(playlist)
@@ -2669,7 +2671,7 @@ private fun DesktopFavoritePlaylistsPanel(
                 items(displayPlaylists, key = { it.id }, contentType = { "favorite-playlist" }) { playlist ->
                     FavoritePlaylistTile(
                         playlist = playlist,
-                        modifier = Modifier.width(260.dp),
+                        modifier = Modifier.width(112.dp),
                         onLongClick = { playlistActions.onShufflePlaylist(playlist) },
                     ) {
                         onPlaylist(playlist)
@@ -2786,48 +2788,20 @@ private fun DesktopFavoriteScrollableRow(
 private fun FavoritePlaylistTile(
     playlist: Playlist,
     modifier: Modifier = Modifier,
-    onLongClick: (() -> Unit)? = null,
+    maxDecodeDimension: Int = 256,
+    onLongClick: () -> Unit = {},
     onClick: () -> Unit,
 ) {
-    Row(
-        modifier
-            .height(112.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .background(PhoebeUi.subtleFill)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        ArtworkImage(
-            playlist.title,
-            playlist.thumbUrl,
-            Modifier.size(56.dp),
-            radius = 8.dp,
-            elevated = false,
-            maxDecodeDimension = ThumbnailArtworkMaxDecodeDimension,
-        )
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                playlist.title,
-                color = PhoebeUi.primaryText,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                "${playlist.trackCount} songs",
-                color = PhoebeUi.secondaryText,
-                fontSize = 11.sp,
-                lineHeight = 15.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        PhoebeIconView(PhoebeIcon.Forward, tint = PhoebeUi.secondaryText, modifier = Modifier.size(14.dp))
-    }
+    HomeArtworkTile(
+        title = playlist.title,
+        subtitle = "${playlist.trackCount} songs",
+        thumbUrl = playlist.thumbUrl,
+        modifier = modifier,
+        maxDecodeDimension = maxDecodeDimension,
+        sharedKey = "playlist:${playlist.id}",
+        onLongClick = onLongClick,
+        onClick = onClick,
+    )
 }
 
 @Composable
@@ -4188,12 +4162,13 @@ private fun HomeArtworkTile(
     modifier: Modifier = Modifier,
     maxDecodeDimension: Int = 256,
     sharedKey: String? = null,
+    onLongClick: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     Column(
         modifier
             .clip(RoundedCornerShape(8.dp))
-            .combinedClickable(onClick = onClick, onLongClick = {}),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         ArtworkImage(
@@ -4205,22 +4180,26 @@ private fun HomeArtworkTile(
             maxDecodeDimension = maxDecodeDimension,
             fallbackThumbUrl = fallbackThumbUrl,
         )
-        Text(
-            title,
-            color = PhoebeUi.primaryText,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.sharedBoundsTransition(sharedKey?.let { "$it:title" }),
-        )
-        Text(
-            subtitle,
-            color = PhoebeUi.secondaryText,
-            fontSize = 10.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.sharedBoundsTransition(sharedKey?.let { "$it:subtitle" }),
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(
+                title,
+                color = PhoebeUi.primaryText,
+                fontSize = 11.sp,
+                lineHeight = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition(sharedKey?.let { "$it:title" }),
+            )
+            Text(
+                subtitle,
+                color = PhoebeUi.secondaryText,
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.sharedBoundsTransition(sharedKey?.let { "$it:subtitle" }),
+            )
+        }
     }
 }
