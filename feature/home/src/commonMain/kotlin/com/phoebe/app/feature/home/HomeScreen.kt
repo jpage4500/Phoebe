@@ -75,6 +75,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -126,6 +127,19 @@ private val PhoneHomeAccordionBreakpoint: Dp = 600.dp
 private val MobileHomePosterCardSize: Dp = 148.dp
 private const val HomePlayedPanelMaxRows = 5
 private const val HomeMixCardAspectRatio = 1f
+private val MobileHomeItemSpacing: Dp = 12.dp
+
+/**
+ * Reports this item [spacing] shorter than it draws, so the list's item spacing overlaps its
+ * bottom edge instead of opening a gap after it. Used on the toolbar so the first section sits
+ * as close under it as the Library tabs do.
+ */
+private fun Modifier.absorbTrailingSpacing(spacing: Dp): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    layout(placeable.width, (placeable.height - spacing.roundToPx()).coerceAtLeast(0)) {
+        placeable.place(0, 0)
+    }
+}
 
 @Composable
 private fun HomeSectionLabel(label: String) {
@@ -798,10 +812,12 @@ private fun MobileHomeContent(
             top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 10.dp,
             bottom = chromePadding.bottom + 10.dp,
         ),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(MobileHomeItemSpacing),
     ) {
         topBar?.let { header ->
-            item(key = "top-bar", contentType = "top-bar") { header() }
+            item(key = "top-bar", contentType = "top-bar") {
+                Box(Modifier.absorbTrailingSpacing(MobileHomeItemSpacing)) { header() }
+            }
         }
         if (catalogSyncInProgress) {
             item(key = "loading", contentType = "loading") { CatalogLoadingStrip() }
@@ -1034,10 +1050,12 @@ private fun MobileExpandedHomeContent(
             top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 10.dp,
             bottom = chromePadding.bottom + 10.dp,
         ),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(MobileHomeItemSpacing),
     ) {
         topBar?.let { header ->
-            item(key = "top-bar", contentType = "top-bar") { header() }
+            item(key = "top-bar", contentType = "top-bar") {
+                Box(Modifier.absorbTrailingSpacing(MobileHomeItemSpacing)) { header() }
+            }
         }
         if (catalogSyncInProgress) {
             item(key = "loading", contentType = "loading") { CatalogLoadingStrip() }
@@ -1367,6 +1385,7 @@ private fun ExpandedFavoriteArtistsShelf(
     onArtist: (Artist) -> Unit,
     onViewAll: () -> Unit,
 ) {
+    val shuffleActions = LocalShuffleActions.current
     val displayArtists = remember(artists) { artists.take(10) }
     if (displayArtists.isEmpty()) {
         ExpandedHomeEmptyShelf(
@@ -1378,7 +1397,7 @@ private fun ExpandedFavoriteArtistsShelf(
     } else {
         ExpandedHomeShelf("FAVORITE ARTISTS", action = "View all", onAction = onViewAll, horizontalSpacing = 12.dp) {
             items(displayArtists, key = { "favorite-artist:${it.id}" }, contentType = { "expanded-favorite-artist" }) { artist ->
-                MobileArtistTile(artist, artistThumbs[artist.id], "artist:${artist.id}") {
+                MobileArtistTile(artist, artistThumbs[artist.id], "artist:${artist.id}", onLongClick = { shuffleActions.onShuffleArtist(artist) }) {
                     onArtist(artist)
                 }
             }
@@ -1394,6 +1413,7 @@ private fun ExpandedFavoriteAlbumsShelf(
     onAlbum: (Album) -> Unit,
     onViewAll: () -> Unit,
 ) {
+    val shuffleActions = LocalShuffleActions.current
     val displayAlbums = remember(albums) { albums.take(10) }
     if (displayAlbums.isEmpty()) {
         ExpandedHomeEmptyShelf(
@@ -1405,7 +1425,7 @@ private fun ExpandedFavoriteAlbumsShelf(
     } else {
         ExpandedHomeShelf("FAVORITE ALBUMS", action = "View all", onAction = onViewAll, horizontalSpacing = 10.dp) {
             items(displayAlbums, key = { "favorite-album:${it.id}" }, contentType = { "expanded-favorite-album" }) { album ->
-                HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(92.dp), maxDecodeDimension = 180, sharedKey = "album:${album.id}") {
+                HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(92.dp), maxDecodeDimension = 180, sharedKey = "album:${album.id}", onLongClick = { shuffleActions.onShuffleAlbum(album) }) {
                     onAlbum(album)
                 }
             }
@@ -1448,13 +1468,14 @@ private fun ExpandedRecentArtistsShelf(
     onArtist: (Artist) -> Unit,
     onViewAll: () -> Unit,
 ) {
+    val shuffleActions = LocalShuffleActions.current
     val displayArtists = remember(artists) { artists.take(10) }
     if (displayArtists.isEmpty()) {
         ExpandedHomeEmptyShelf("RECENT ARTISTS", "Recently added artists will appear here.", action = "View all", onAction = onViewAll)
     } else {
         ExpandedHomeShelf("RECENT ARTISTS", action = "View all", onAction = onViewAll, horizontalSpacing = 12.dp) {
             items(displayArtists, key = { "recent-artist:${it.id}" }, contentType = { "expanded-recent-artist" }) { artist ->
-                MobileArtistTile(artist, artistThumbs[artist.id], "artist:${artist.id}") {
+                MobileArtistTile(artist, artistThumbs[artist.id], "artist:${artist.id}", onLongClick = { shuffleActions.onShuffleArtist(artist) }) {
                     onArtist(artist)
                 }
             }
@@ -1469,13 +1490,14 @@ private fun ExpandedRecentAlbumsShelf(
     onAlbum: (Album) -> Unit,
     onViewAll: () -> Unit,
 ) {
+    val shuffleActions = LocalShuffleActions.current
     val displayAlbums = remember(albums) { albums.take(10) }
     if (displayAlbums.isEmpty()) {
         ExpandedHomeEmptyShelf("RECENT ALBUMS", "Recently added albums will appear here.", action = "View all", onAction = onViewAll)
     } else {
         ExpandedHomeShelf("RECENT ALBUMS", action = "View all", onAction = onViewAll, horizontalSpacing = 10.dp) {
             items(displayAlbums, key = { "recent-album:${it.id}" }, contentType = { "expanded-recent-album" }) { album ->
-                HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(92.dp), maxDecodeDimension = 180, sharedKey = "album:${album.id}") {
+                HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(92.dp), maxDecodeDimension = 180, sharedKey = "album:${album.id}", onLongClick = { shuffleActions.onShuffleAlbum(album) }) {
                     onAlbum(album)
                 }
             }
@@ -2303,6 +2325,7 @@ private fun MobileFavoriteArtistsSection(
     onViewAll: () -> Unit,
     totalCount: Int = artists.size,
 ) {
+    val shuffleActions = LocalShuffleActions.current
     if (artists.isEmpty()) {
         HomeSectionLabel("FAVORITE ARTISTS")
         HomeEmptyState("Favorite artists will appear here.")
@@ -2311,7 +2334,7 @@ private fun MobileFavoriteArtistsSection(
         SectionHeader("FAVORITE ARTISTS", if (totalCount > 10) "View all" else null, onViewAll)
         HomeHorizontalCarousel(Modifier.fillMaxWidth(), horizontalSpacing = 12.dp) {
             items(visibleArtists, key = { it.id }, contentType = { "mobile-favorite-artist" }) { artist ->
-                MobileArtistTile(artist, artistThumbs[artist.id], "artist:${artist.id}") {
+                MobileArtistTile(artist, artistThumbs[artist.id], "artist:${artist.id}", onLongClick = { shuffleActions.onShuffleArtist(artist) }) {
                     onArtist(artist)
                 }
             }
@@ -2327,6 +2350,7 @@ private fun MobileFavoriteAlbumsSection(
     onViewAll: () -> Unit,
     totalCount: Int = albums.size,
 ) {
+    val shuffleActions = LocalShuffleActions.current
     if (albums.isEmpty()) {
         HomeSectionLabel("FAVORITE ALBUMS")
         HomeEmptyState("Favorite albums will appear here.")
@@ -2335,7 +2359,7 @@ private fun MobileFavoriteAlbumsSection(
         SectionHeader("FAVORITE ALBUMS", if (totalCount > 10) "View all" else null, onViewAll)
         HomeHorizontalCarousel(Modifier.fillMaxWidth()) {
             items(visibleAlbums, key = { it.id }, contentType = { "mobile-favorite-album" }) { album ->
-                HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(92.dp), maxDecodeDimension = 180, sharedKey = "album:${album.id}") {
+                HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(92.dp), maxDecodeDimension = 180, sharedKey = "album:${album.id}", onLongClick = { shuffleActions.onShuffleAlbum(album) }) {
                     onAlbum(album)
                 }
             }
@@ -2610,6 +2634,7 @@ private fun DesktopRecentArtistsPanel(
     onArtist: (Artist) -> Unit,
     panelStyle: HomePanelStyle = HomePanelStyle.Card,
 ) {
+    val shuffleActions = LocalShuffleActions.current
     HomePanel(Modifier.fillMaxWidth(), style = panelStyle) {
         SectionHeader("RECENTLY ADDED ARTISTS", "See all", onRecentArtists)
         if (artists.isEmpty()) {
@@ -2617,7 +2642,7 @@ private fun DesktopRecentArtistsPanel(
         } else {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(artists.take(10), key = { it.id }, contentType = { "desktop-recent-artist" }) { artist ->
-                    MobileArtistTile(artist, artistThumbs[artist.id], "artist:${artist.id}", width = 112.dp) { onArtist(artist) }
+                    MobileArtistTile(artist, artistThumbs[artist.id], "artist:${artist.id}", width = 112.dp, onLongClick = { shuffleActions.onShuffleArtist(artist) }) { onArtist(artist) }
                 }
             }
         }
@@ -2632,6 +2657,7 @@ private fun DesktopRecentAlbumsPanel(
     onAlbum: (Album) -> Unit,
     panelStyle: HomePanelStyle = HomePanelStyle.Card,
 ) {
+    val shuffleActions = LocalShuffleActions.current
     HomePanel(Modifier.fillMaxWidth(), style = panelStyle) {
         SectionHeader("RECENTLY ADDED ALBUMS", "See all", onRecentAlbums)
         if (albums.isEmpty()) {
@@ -2639,7 +2665,7 @@ private fun DesktopRecentAlbumsPanel(
         } else {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(albums.take(10), key = { it.id }, contentType = { "desktop-recent-album" }) { album ->
-                    HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(112.dp), sharedKey = "album:${album.id}") { onAlbum(album) }
+                    HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(112.dp), sharedKey = "album:${album.id}", onLongClick = { shuffleActions.onShuffleAlbum(album) }) { onAlbum(album) }
                 }
             }
         }
@@ -2691,6 +2717,7 @@ private fun DesktopFavoriteArtistsPanel(
     totalCount: Int = artists.size,
     panelStyle: HomePanelStyle = HomePanelStyle.Card,
 ) {
+    val shuffleActions = LocalShuffleActions.current
     HomePanel(Modifier.fillMaxWidth(), style = panelStyle) {
         if (artists.isEmpty()) {
             HomeSectionLabel("FAVORITE ARTISTS")
@@ -2706,7 +2733,7 @@ private fun DesktopFavoriteArtistsPanel(
                 horizontalGap = 12.dp,
             ) {
                 items(displayArtists, key = { it.id }, contentType = { "favorite-artist" }) { artist ->
-                    MobileArtistTile(artist, artistThumbs[artist.id], "artist:${artist.id}", width = 112.dp) { onArtist(artist) }
+                    MobileArtistTile(artist, artistThumbs[artist.id], "artist:${artist.id}", width = 112.dp, onLongClick = { shuffleActions.onShuffleArtist(artist) }) { onArtist(artist) }
                 }
             }
         }
@@ -2722,6 +2749,7 @@ private fun DesktopFavoriteAlbumsPanel(
     totalCount: Int = albums.size,
     panelStyle: HomePanelStyle = HomePanelStyle.Card,
 ) {
+    val shuffleActions = LocalShuffleActions.current
     HomePanel(Modifier.fillMaxWidth(), style = panelStyle) {
         if (albums.isEmpty()) {
             HomeSectionLabel("FAVORITE ALBUMS")
@@ -2736,7 +2764,7 @@ private fun DesktopFavoriteAlbumsPanel(
                 onViewAll = onViewAll,
             ) {
                 items(displayAlbums, key = { it.id }, contentType = { "favorite-album" }) { album ->
-                    HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(112.dp), sharedKey = "album:${album.id}") { onAlbum(album) }
+                    HomeArtworkTile(album.title, album.artist, album.thumbUrl, fallbackThumbUrl = albumArtworkFallbacks[album.id], modifier = Modifier.width(112.dp), sharedKey = "album:${album.id}", onLongClick = { shuffleActions.onShuffleAlbum(album) }) { onAlbum(album) }
                 }
             }
         }
@@ -3451,13 +3479,14 @@ private fun MobileArtistTile(
     modifier: Modifier = Modifier,
     width: Dp = 92.dp,
     artworkSize: Dp = width,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     Column(
         modifier
             .width(width)
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
