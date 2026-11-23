@@ -75,6 +75,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -126,6 +127,19 @@ private val PhoneHomeAccordionBreakpoint: Dp = 600.dp
 private val MobileHomePosterCardSize: Dp = 148.dp
 private const val HomePlayedPanelMaxRows = 5
 private const val HomeMixCardAspectRatio = 1f
+private val MobileHomeItemSpacing: Dp = 12.dp
+
+/**
+ * Reports this item [spacing] shorter than it draws, so the list's item spacing overlaps its
+ * bottom edge instead of opening a gap after it. Used on the toolbar so the first section sits
+ * as close under it as the Library tabs do.
+ */
+private fun Modifier.absorbTrailingSpacing(spacing: Dp): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    layout(placeable.width, (placeable.height - spacing.roundToPx()).coerceAtLeast(0)) {
+        placeable.place(0, 0)
+    }
+}
 
 @Composable
 private fun HomeSectionLabel(label: String) {
@@ -798,10 +812,12 @@ private fun MobileHomeContent(
             top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 10.dp,
             bottom = chromePadding.bottom + 10.dp,
         ),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(MobileHomeItemSpacing),
     ) {
         topBar?.let { header ->
-            item(key = "top-bar", contentType = "top-bar") { header() }
+            item(key = "top-bar", contentType = "top-bar") {
+                Box(Modifier.absorbTrailingSpacing(MobileHomeItemSpacing)) { header() }
+            }
         }
         if (catalogSyncInProgress) {
             item(key = "loading", contentType = "loading") { CatalogLoadingStrip() }
@@ -1034,10 +1050,12 @@ private fun MobileExpandedHomeContent(
             top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 10.dp,
             bottom = chromePadding.bottom + 10.dp,
         ),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(MobileHomeItemSpacing),
     ) {
         topBar?.let { header ->
-            item(key = "top-bar", contentType = "top-bar") { header() }
+            item(key = "top-bar", contentType = "top-bar") {
+                Box(Modifier.absorbTrailingSpacing(MobileHomeItemSpacing)) { header() }
+            }
         }
         if (catalogSyncInProgress) {
             item(key = "loading", contentType = "loading") { CatalogLoadingStrip() }
