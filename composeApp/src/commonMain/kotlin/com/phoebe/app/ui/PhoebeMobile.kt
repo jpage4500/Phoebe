@@ -438,6 +438,9 @@ internal fun MobileBrowseShell(
     }
     var libraryFavoritesOnly by rememberSaveable { mutableStateOf(false) }
     var playlistsFavoritesOnly by rememberSaveable { mutableStateOf(false) }
+    // The open Settings sub-page lives here so the toolbar can title it and step back to the hub.
+    var settingsPage by rememberSaveable(section) { mutableStateOf<SettingsCategory?>(null) }
+    val onSettingsSubPage = section == BrowseSection.Settings && selectedPlaylistId == null && settingsPage != null
     // Home's favorites "View all" opens the matching browse tab with its favorites filter on.
     val onFavoritePlaylists: () -> Unit = {
         playlistsFavoritesOnly = true
@@ -466,7 +469,7 @@ internal fun MobileBrowseShell(
     val installingUpdateState = appUpdateState as? AppUpdateState.Installing
     val updateInstalling = installingUpdateState != null
     val toolbarTitle = when {
-        section == BrowseSection.Settings -> "Settings"
+        section == BrowseSection.Settings -> settingsPage?.label ?: "Settings"
         section == BrowseSection.Downloads -> "Downloads"
         selectedPlaylistId != null -> "Playlist"
         section == BrowseSection.Radio -> when (internetRadioRouteMode) {
@@ -476,6 +479,13 @@ internal fun MobileBrowseShell(
             RadioRouteMode.Map -> "Radio map"
         }
         else -> mobileSectionTitle(section)
+    }
+    // Settings pages drop their repeated card title on phones, so the toolbar carries the page summary.
+    val toolbarSubtitle = when {
+        selectedPlaylistId != null -> null
+        section == BrowseSection.Settings -> settingsPage?.subtitle
+        section == BrowseSection.Downloads -> SettingsCategory.Downloads.subtitle
+        else -> null
     }
     val density = LocalDensity.current
     val navigationBottomPadding = with(density) {
@@ -541,7 +551,10 @@ internal fun MobileBrowseShell(
         }
         MobileScreenToolbar(
             title = toolbarTitle,
-            onBack = if (
+            subtitle = toolbarSubtitle,
+            onBack = if (onSettingsSubPage) {
+                { settingsPage = null }
+            } else if (
                 (section == BrowseSection.Settings || section == BrowseSection.Charts) &&
                 selectedPlaylistId == null
             ) {
@@ -794,6 +807,8 @@ internal fun MobileBrowseShell(
                         onConnectRemoteControl = onOpenRemoteControl,
                         onDisconnectRemoteControl = onDisconnectRemoteControl,
                     ),
+                    page = settingsPage,
+                    onPageChange = { settingsPage = it },
                     modifier = Modifier.fillMaxSize().padding(top = chromePadding.top, bottom = chromePadding.bottom),
                 )
                 section == BrowseSection.Home && selectedPlaylistId == null -> {
