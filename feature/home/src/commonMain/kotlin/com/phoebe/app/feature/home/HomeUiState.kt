@@ -42,7 +42,20 @@ data class HomeUiState(
     val albumArtworkFallbacks: Map<String, String> = emptyMap(),
     val randomArtistStats: HomeFeaturedArtistStats? = null,
     val randomAlbumStats: HomeFeaturedAlbumStats? = null,
+    /**
+     * True once this state was derived from a catalog that finished restoring from disk.
+     * Before then, empty lists mean "not known yet" rather than "none".
+     */
+    val catalogReady: Boolean = false,
 )
+
+/**
+ * Favorites rows render skeleton tiles (sized like the real carousel) instead of the
+ * short empty-state text while their contents may still be arriving, so the home
+ * list doesn't jump taller once favorites fill in.
+ */
+fun HomeUiState.favoritesPending(catalogSyncInProgress: Boolean): Boolean =
+    !catalogReady || catalogSyncInProgress
 
 @Immutable
 data class HomeFeaturedArtistStats(
@@ -202,6 +215,7 @@ fun deriveHomeUiState(
     trackIndexCache: HomeCatalogIndexCache? = null,
     includeTrackDerivedSections: Boolean = true,
     resolvedTracksById: Map<String, Track> = emptyMap(),
+    catalogReady: Boolean = true,
 ): HomeUiState {
     val albumAddedByTitle = albumAddedByTitle(catalog)
     val artistAddedByTitle = artistAddedByTitle(catalog)
@@ -292,6 +306,7 @@ fun deriveHomeUiState(
         ),
         randomArtistStats = randomArtistStats,
         randomAlbumStats = randomAlbumStats,
+        catalogReady = catalogReady,
     )
 }
 

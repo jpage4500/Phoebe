@@ -176,6 +176,7 @@ class AppState(
 ) {
     val session = dependencies.sessionRepository.session
     val catalog = dependencies.catalogRepository.catalog
+    val catalogCacheRestored = dependencies.catalogRepository.cacheRestored
     val downloads = dependencies.catalogRepository.downloads
     val downloadEvents = dependencies.catalogRepository.downloadEvents
     val smartPlaylists = dependencies.userArtifactsRepository.smartPlaylists

@@ -36,6 +36,9 @@ fun rememberHomeFeatureState(
     catalog: CatalogSnapshot,
     playHistory: PlayHistorySnapshot,
     catalogSyncInProgress: Boolean,
+    // False while the startup disk restore is still running; derived state then
+    // isn't treated as final so favorites rows keep their placeholders.
+    catalogCacheRestored: Boolean = true,
     trackHeavySectionsEnabled: Boolean,
     nowMs: Long,
     resolveTracksByIds: suspend (List<String>) -> Map<String, Track>,
@@ -79,6 +82,7 @@ fun rememberHomeFeatureState(
         nowMs,
         trackHeavySectionsEnabled,
         resolvedTracksKey,
+        catalogCacheRestored,
     ) {
         val delayMs = homeUiStateDeriveDelayMs(
             catalogSyncInProgress = catalogSyncInProgress,
@@ -98,6 +102,7 @@ fun rememberHomeFeatureState(
                     trackIndexCache = trackIndexCache,
                     includeTrackDerivedSections = trackHeavySectionsEnabled,
                     resolvedTracksById = resolvedTracksById,
+                    catalogReady = catalogCacheRestored,
                 )
             }
         }
