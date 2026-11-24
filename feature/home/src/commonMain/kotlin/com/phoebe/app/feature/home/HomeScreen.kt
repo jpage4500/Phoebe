@@ -67,6 +67,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.runtime.State
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -255,11 +259,13 @@ fun MobileHomeRoute(
 private fun HomeHorizontalCarousel(
     modifier: Modifier = Modifier,
     horizontalSpacing: Dp = 10.dp,
+    userScrollEnabled: Boolean = true,
     content: LazyListScope.() -> Unit,
 ) {
     LazyRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
+        userScrollEnabled = userScrollEnabled,
         content = content,
     )
 }
@@ -335,6 +341,7 @@ fun DesktopHomeScreen(
     val artistThumbs = state.artistThumbs
     val albumArtworkFallbacks = state.albumArtworkFallbacks
     val catalogSyncInProgress = LocalCatalogSyncInProgress.current
+    val favoritesLoading = state.favoritesPending(catalogSyncInProgress)
     LazyColumn(
         state = listState,
         modifier = modifier.fillMaxSize().padding(
@@ -384,24 +391,24 @@ fun DesktopHomeScreen(
                             state.favoritePlaylists,
                             onPlaylist,
                             onFavoritePlaylists,
-                            totalCount = state.favoritePlaylistCount,
+                            totalCount = state.favoritePlaylistCount, loading = favoritesLoading,
                             panelStyle = panelStyle,
                         )
                     }
-                    item("favorite-artists") { DesktopFavoriteArtistsPanel(state.favoriteArtists, artistThumbs, onArtist, onFavoriteArtists, totalCount = state.favoriteArtistCount, panelStyle = panelStyle) }
-                    item("favorite-albums") { DesktopFavoriteAlbumsPanel(state.favoriteAlbums, albumArtworkFallbacks, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount, panelStyle = panelStyle) }
+                    item("favorite-artists") { DesktopFavoriteArtistsPanel(state.favoriteArtists, artistThumbs, onArtist, onFavoriteArtists, totalCount = state.favoriteArtistCount, loading = favoritesLoading, panelStyle = panelStyle) }
+                    item("favorite-albums") { DesktopFavoriteAlbumsPanel(state.favoriteAlbums, albumArtworkFallbacks, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount, loading = favoritesLoading, panelStyle = panelStyle) }
                 }
                 HomeSection.FavoritePlaylists -> item("favorite-playlists") {
                     DesktopFavoritePlaylistsPanel(
                         state.favoritePlaylists,
                         onPlaylist,
                         onFavoritePlaylists,
-                        totalCount = state.favoritePlaylistCount,
+                        totalCount = state.favoritePlaylistCount, loading = favoritesLoading,
                         panelStyle = panelStyle,
                     )
                 }
-                HomeSection.FavoriteArtists -> item("favorite-artists") { DesktopFavoriteArtistsPanel(state.favoriteArtists, artistThumbs, onArtist, onFavoriteArtists, totalCount = state.favoriteArtistCount, panelStyle = panelStyle) }
-                HomeSection.FavoriteAlbums -> item("favorite-albums") { DesktopFavoriteAlbumsPanel(state.favoriteAlbums, albumArtworkFallbacks, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount, panelStyle = panelStyle) }
+                HomeSection.FavoriteArtists -> item("favorite-artists") { DesktopFavoriteArtistsPanel(state.favoriteArtists, artistThumbs, onArtist, onFavoriteArtists, totalCount = state.favoriteArtistCount, loading = favoritesLoading, panelStyle = panelStyle) }
+                HomeSection.FavoriteAlbums -> item("favorite-albums") { DesktopFavoriteAlbumsPanel(state.favoriteAlbums, albumArtworkFallbacks, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount, loading = favoritesLoading, panelStyle = panelStyle) }
                 HomeSection.Recents -> {
                     item("recent-songs") { DesktopRecentSongsPanel(state.recentlyAddedTracks, onRecentSongs, onPlayTracks, panelStyle = panelStyle) }
                     item("recent-artists") { DesktopRecentArtistsPanel(state.recentlyAddedArtists, artistThumbs, onRecentArtists, onArtist, panelStyle = panelStyle) }
@@ -805,6 +812,7 @@ private fun MobileHomeContent(
             listState.animateScrollToItem(index)
         }
     }
+    val favoritesLoading = state.favoritesPending(catalogSyncInProgress)
     LazyColumn(
         state = listState,
         modifier = modifier.padding(horizontal = 16.dp),
@@ -926,22 +934,22 @@ private fun MobileHomeContent(
                             state.favoritePlaylists,
                             onPlaylist,
                             onFavoritePlaylists,
-                            totalCount = state.favoritePlaylistCount,
+                            totalCount = state.favoritePlaylistCount, loading = favoritesLoading,
                         )
                     }
-                    item(key = "favorite-artists", contentType = "favorite-artists-section") { MobileFavoriteArtistsSection(state.favoriteArtists, artistThumbs, onArtist, onFavoriteArtists, totalCount = state.favoriteArtistCount) }
-                    item(key = "favorite-albums", contentType = "favorite-albums-section") { MobileFavoriteAlbumsSection(state.favoriteAlbums, albumArtworkFallbacks, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount) }
+                    item(key = "favorite-artists", contentType = "favorite-artists-section") { MobileFavoriteArtistsSection(state.favoriteArtists, artistThumbs, onArtist, onFavoriteArtists, totalCount = state.favoriteArtistCount, loading = favoritesLoading) }
+                    item(key = "favorite-albums", contentType = "favorite-albums-section") { MobileFavoriteAlbumsSection(state.favoriteAlbums, albumArtworkFallbacks, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount, loading = favoritesLoading) }
                 }
                 HomeSection.FavoritePlaylists -> item(key = "favorite-playlists", contentType = "favorite-playlists-section") {
                     MobileFavoritePlaylistsSection(
                         state.favoritePlaylists,
                         onPlaylist,
                         onFavoritePlaylists,
-                        totalCount = state.favoritePlaylistCount,
+                        totalCount = state.favoritePlaylistCount, loading = favoritesLoading,
                     )
                 }
-                HomeSection.FavoriteArtists -> item(key = "favorite-artists", contentType = "favorite-artists-section") { MobileFavoriteArtistsSection(state.favoriteArtists, artistThumbs, onArtist, onFavoriteArtists, totalCount = state.favoriteArtistCount) }
-                HomeSection.FavoriteAlbums -> item(key = "favorite-albums", contentType = "favorite-albums-section") { MobileFavoriteAlbumsSection(state.favoriteAlbums, albumArtworkFallbacks, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount) }
+                HomeSection.FavoriteArtists -> item(key = "favorite-artists", contentType = "favorite-artists-section") { MobileFavoriteArtistsSection(state.favoriteArtists, artistThumbs, onArtist, onFavoriteArtists, totalCount = state.favoriteArtistCount, loading = favoritesLoading) }
+                HomeSection.FavoriteAlbums -> item(key = "favorite-albums", contentType = "favorite-albums-section") { MobileFavoriteAlbumsSection(state.favoriteAlbums, albumArtworkFallbacks, onAlbum, onFavoriteAlbums, totalCount = state.favoriteAlbumCount, loading = favoritesLoading) }
                 HomeSection.Played -> item(key = "played-shortcuts", contentType = "played-shortcuts-section") {
                     if (usePhoneAccordions) {
                         PhonePlayedAccordionSection(
@@ -1043,6 +1051,7 @@ private fun MobileExpandedHomeContent(
     onDownload: (Track) -> Unit,
     topBar: (@Composable () -> Unit)?,
 ) {
+    val favoritesLoading = state.favoritesPending(catalogSyncInProgress)
     LazyColumn(
         state = listState,
         modifier = modifier.padding(horizontal = 16.dp),
@@ -1067,7 +1076,7 @@ private fun MobileExpandedHomeContent(
                         item(key = "expanded-favorite-playlists", contentType = "expanded-favorite-playlists") {
                             ExpandedFavoritePlaylistsShelf(
                                 playlists = state.favoritePlaylists,
-                                totalCount = state.favoritePlaylistCount,
+                                totalCount = state.favoritePlaylistCount, loading = favoritesLoading,
                                 onPlaylist = onPlaylist,
                                 onViewAll = onFavoritePlaylists,
                             )
@@ -1078,7 +1087,7 @@ private fun MobileExpandedHomeContent(
                             ExpandedFavoriteArtistsShelf(
                                 artists = state.favoriteArtists,
                                 artistThumbs = artistThumbs,
-                                totalCount = state.favoriteArtistCount,
+                                totalCount = state.favoriteArtistCount, loading = favoritesLoading,
                                 onArtist = onArtist,
                                 onViewAll = onFavoriteArtists,
                             )
@@ -1089,7 +1098,7 @@ private fun MobileExpandedHomeContent(
                             ExpandedFavoriteAlbumsShelf(
                                 albums = state.favoriteAlbums,
                                 albumArtworkFallbacks = albumArtworkFallbacks,
-                                totalCount = state.favoriteAlbumCount,
+                                totalCount = state.favoriteAlbumCount, loading = favoritesLoading,
                                 onAlbum = onAlbum,
                                 onViewAll = onFavoriteAlbums,
                             )
@@ -1186,6 +1195,7 @@ private fun ExpandedHomeShelf(
     action: String? = null,
     onAction: () -> Unit = {},
     horizontalSpacing: Dp = 10.dp,
+    userScrollEnabled: Boolean = true,
     content: LazyListScope.() -> Unit,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1193,6 +1203,7 @@ private fun ExpandedHomeShelf(
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
+            userScrollEnabled = userScrollEnabled,
             content = content,
         )
     }
@@ -1349,12 +1360,17 @@ private fun ExpandedFavoritePlaylistsShelf(
     totalCount: Int,
     onPlaylist: (Playlist) -> Unit,
     onViewAll: () -> Unit,
+    loading: Boolean = false,
 ) {
     val playlistActions = LocalPlaylistActions.current
     val displayPlaylists = remember(playlists) {
         playlists.distinctBy { it.id }.filter { it.id.isNotBlank() }.take(10)
     }
-    if (displayPlaylists.isEmpty()) {
+    if (displayPlaylists.isEmpty() && loading) {
+        ExpandedHomeShelf("FAVORITE PLAYLISTS", action = "View all", onAction = onViewAll, horizontalSpacing = 10.dp, userScrollEnabled = false) {
+            homeArtworkTilePlaceholders(tileWidth = 92.dp)
+        }
+    } else if (displayPlaylists.isEmpty()) {
         ExpandedHomeEmptyShelf(
             title = "FAVORITE PLAYLISTS",
             message = "Favorite playlists will appear here.",
@@ -1384,10 +1400,15 @@ private fun ExpandedFavoriteArtistsShelf(
     totalCount: Int,
     onArtist: (Artist) -> Unit,
     onViewAll: () -> Unit,
+    loading: Boolean = false,
 ) {
     val shuffleActions = LocalShuffleActions.current
     val displayArtists = remember(artists) { artists.take(10) }
-    if (displayArtists.isEmpty()) {
+    if (displayArtists.isEmpty() && loading) {
+        ExpandedHomeShelf("FAVORITE ARTISTS", action = "View all", onAction = onViewAll, horizontalSpacing = 12.dp, userScrollEnabled = false) {
+            homeArtistTilePlaceholders()
+        }
+    } else if (displayArtists.isEmpty()) {
         ExpandedHomeEmptyShelf(
             title = "FAVORITE ARTISTS",
             message = "Favorite artists will appear here.",
@@ -1412,10 +1433,15 @@ private fun ExpandedFavoriteAlbumsShelf(
     totalCount: Int,
     onAlbum: (Album) -> Unit,
     onViewAll: () -> Unit,
+    loading: Boolean = false,
 ) {
     val shuffleActions = LocalShuffleActions.current
     val displayAlbums = remember(albums) { albums.take(10) }
-    if (displayAlbums.isEmpty()) {
+    if (displayAlbums.isEmpty() && loading) {
+        ExpandedHomeShelf("FAVORITE ALBUMS", action = "View all", onAction = onViewAll, horizontalSpacing = 10.dp, userScrollEnabled = false) {
+            homeArtworkTilePlaceholders(tileWidth = 92.dp)
+        }
+    } else if (displayAlbums.isEmpty()) {
         ExpandedHomeEmptyShelf(
             title = "FAVORITE ALBUMS",
             message = "Favorite albums will appear here.",
@@ -2292,9 +2318,15 @@ private fun MobileFavoritePlaylistsSection(
     onPlaylist: (Playlist) -> Unit,
     onViewAll: () -> Unit,
     totalCount: Int = playlists.size,
+    loading: Boolean = false,
 ) {
     val playlistActions = LocalPlaylistActions.current
-    if (playlists.isEmpty()) {
+    if (playlists.isEmpty() && loading) {
+        SectionHeader("FAVORITE PLAYLISTS", null, onViewAll)
+        HomeHorizontalCarousel(Modifier.fillMaxWidth(), userScrollEnabled = false) {
+            homeArtworkTilePlaceholders(tileWidth = 92.dp)
+        }
+    } else if (playlists.isEmpty()) {
         HomeSectionLabel("FAVORITE PLAYLISTS")
         HomeEmptyState("Favorite playlists will appear here.")
     } else {
@@ -2324,9 +2356,15 @@ private fun MobileFavoriteArtistsSection(
     onArtist: (Artist) -> Unit,
     onViewAll: () -> Unit,
     totalCount: Int = artists.size,
+    loading: Boolean = false,
 ) {
     val shuffleActions = LocalShuffleActions.current
-    if (artists.isEmpty()) {
+    if (artists.isEmpty() && loading) {
+        SectionHeader("FAVORITE ARTISTS", null, onViewAll)
+        HomeHorizontalCarousel(Modifier.fillMaxWidth(), horizontalSpacing = 12.dp, userScrollEnabled = false) {
+            homeArtistTilePlaceholders()
+        }
+    } else if (artists.isEmpty()) {
         HomeSectionLabel("FAVORITE ARTISTS")
         HomeEmptyState("Favorite artists will appear here.")
     } else {
@@ -2349,9 +2387,15 @@ private fun MobileFavoriteAlbumsSection(
     onAlbum: (Album) -> Unit,
     onViewAll: () -> Unit,
     totalCount: Int = albums.size,
+    loading: Boolean = false,
 ) {
     val shuffleActions = LocalShuffleActions.current
-    if (albums.isEmpty()) {
+    if (albums.isEmpty() && loading) {
+        SectionHeader("FAVORITE ALBUMS", null, onViewAll)
+        HomeHorizontalCarousel(Modifier.fillMaxWidth(), userScrollEnabled = false) {
+            homeArtworkTilePlaceholders(tileWidth = 92.dp)
+        }
+    } else if (albums.isEmpty()) {
         HomeSectionLabel("FAVORITE ALBUMS")
         HomeEmptyState("Favorite albums will appear here.")
     } else {
@@ -2678,11 +2722,16 @@ private fun DesktopFavoritePlaylistsPanel(
     onPlaylist: (Playlist) -> Unit,
     onViewAll: () -> Unit,
     totalCount: Int = playlists.size,
+    loading: Boolean = false,
     panelStyle: HomePanelStyle = HomePanelStyle.Card,
 ) {
     val playlistActions = LocalPlaylistActions.current
     HomePanel(Modifier.fillMaxWidth(), style = panelStyle) {
-        if (playlists.isEmpty()) {
+        if (playlists.isEmpty() && loading) {
+            DesktopFavoriteScrollableRow(title = "FAVORITE PLAYLISTS", showViewAll = false, onViewAll = onViewAll) {
+                homeArtworkTilePlaceholders(tileWidth = 112.dp)
+            }
+        } else if (playlists.isEmpty()) {
             HomeSectionLabel("FAVORITE PLAYLISTS")
             HomeEmptyState("Favorite playlists will appear here.")
         } else {
@@ -2715,11 +2764,16 @@ private fun DesktopFavoriteArtistsPanel(
     onArtist: (Artist) -> Unit,
     onViewAll: () -> Unit,
     totalCount: Int = artists.size,
+    loading: Boolean = false,
     panelStyle: HomePanelStyle = HomePanelStyle.Card,
 ) {
     val shuffleActions = LocalShuffleActions.current
     HomePanel(Modifier.fillMaxWidth(), style = panelStyle) {
-        if (artists.isEmpty()) {
+        if (artists.isEmpty() && loading) {
+            DesktopFavoriteScrollableRow(title = "FAVORITE ARTISTS", showViewAll = false, onViewAll = onViewAll, horizontalGap = 12.dp) {
+                homeArtistTilePlaceholders(tileWidth = 112.dp)
+            }
+        } else if (artists.isEmpty()) {
             HomeSectionLabel("FAVORITE ARTISTS")
             HomeEmptyState("Favorite artists will appear here.")
         } else {
@@ -2747,11 +2801,16 @@ private fun DesktopFavoriteAlbumsPanel(
     onAlbum: (Album) -> Unit,
     onViewAll: () -> Unit,
     totalCount: Int = albums.size,
+    loading: Boolean = false,
     panelStyle: HomePanelStyle = HomePanelStyle.Card,
 ) {
     val shuffleActions = LocalShuffleActions.current
     HomePanel(Modifier.fillMaxWidth(), style = panelStyle) {
-        if (albums.isEmpty()) {
+        if (albums.isEmpty() && loading) {
+            DesktopFavoriteScrollableRow(title = "FAVORITE ALBUMS", showViewAll = false, onViewAll = onViewAll) {
+                homeArtworkTilePlaceholders(tileWidth = 112.dp)
+            }
+        } else if (albums.isEmpty()) {
             HomeSectionLabel("FAVORITE ALBUMS")
             HomeEmptyState("Favorite albums will appear here.")
         } else {
@@ -3750,6 +3809,88 @@ private fun HomeArtistStat(
             }
             Text(label, color = PhoebeUi.mutedText, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+    }
+}
+
+private const val HomeTilePlaceholderCount = 6
+
+/** Skeleton stand-ins for [HomeArtworkTile] (playlists/albums) while favorites load. */
+private fun LazyListScope.homeArtworkTilePlaceholders(tileWidth: Dp) {
+    items(HomeTilePlaceholderCount, key = { "artwork-placeholder:$it" }, contentType = { "home-artwork-placeholder" }) {
+        HomeArtworkTilePlaceholder(Modifier.width(tileWidth))
+    }
+}
+
+/** Skeleton stand-ins for [MobileArtistTile] while favorites load. */
+private fun LazyListScope.homeArtistTilePlaceholders(tileWidth: Dp = 92.dp) {
+    items(HomeTilePlaceholderCount, key = { "artist-placeholder:$it" }, contentType = { "home-artist-placeholder" }) {
+        HomeArtistTilePlaceholder(tileWidth)
+    }
+}
+
+@Composable
+private fun rememberHomePlaceholderPulse(): State<Float> =
+    rememberInfiniteTransition(label = "home-placeholder").animateFloat(
+        initialValue = 0.28f,
+        targetValue = 0.62f,
+        animationSpec = infiniteRepeatable(animation = tween(900, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
+        label = "home-placeholder-alpha",
+    )
+
+// Reads the pulse in the draw phase so the animation doesn't recompose the tile every frame.
+private fun Modifier.homePlaceholderFill(pulse: State<Float>, color: Color, shape: Shape): Modifier =
+    clip(shape).drawBehind { drawRect(color.copy(alpha = pulse.value)) }
+
+// Mirrors HomeArtworkTile's layout so swapping in the real tile doesn't change the row height.
+@Composable
+private fun HomeArtworkTilePlaceholder(modifier: Modifier = Modifier) {
+    val pulse = rememberHomePlaceholderPulse()
+    val fill = PhoebeUi.elevatedFill
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1f).homePlaceholderFill(pulse, fill, RoundedCornerShape(7.dp)))
+        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            HomePlaceholderTextLine(pulse, fill, widthFraction = 0.82f, fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.SemiBold)
+            HomePlaceholderTextLine(pulse, fill, widthFraction = 0.56f, fontSize = 10.sp, lineHeight = 12.sp)
+        }
+    }
+}
+
+// Mirrors MobileArtistTile's layout.
+@Composable
+private fun HomeArtistTilePlaceholder(width: Dp) {
+    val pulse = rememberHomePlaceholderPulse()
+    val fill = PhoebeUi.elevatedFill
+    Column(
+        Modifier.width(width).padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(Modifier.size(width).homePlaceholderFill(pulse, fill, CircleShape))
+        HomePlaceholderTextLine(
+            pulse,
+            fill,
+            widthFraction = 0.7f,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            alignment = Alignment.Center,
+        )
+    }
+}
+
+@Composable
+private fun HomePlaceholderTextLine(
+    pulse: State<Float>,
+    fill: Color,
+    widthFraction: Float,
+    fontSize: TextUnit,
+    lineHeight: TextUnit = TextUnit.Unspecified,
+    fontWeight: FontWeight? = null,
+    alignment: Alignment = Alignment.CenterStart,
+) {
+    Box(Modifier.fillMaxWidth(), contentAlignment = alignment) {
+        // Invisible single-line text reserves exactly the height the real label takes.
+        Text(" ", color = Color.Transparent, fontSize = fontSize, lineHeight = lineHeight, fontWeight = fontWeight, maxLines = 1)
+        Box(Modifier.fillMaxWidth(widthFraction).height(7.dp).homePlaceholderFill(pulse, fill, RoundedCornerShape(3.dp)))
     }
 }
 

@@ -398,6 +398,7 @@ private fun PhoebeRootStateHolder(
     }
     val navigator = rememberPhoebeNavigator(initialRoutes)
     val catalog by state.catalog.collectAsState()
+    val catalogCacheRestored by state.catalogCacheRestored.collectAsState()
     val catalogWorkActive by state.catalogRefreshing.collectAsState()
     val catalogSyncState by state.catalogSyncState.collectAsState()
     val tracksLoading by state.tracksLoading.collectAsState()
@@ -875,6 +876,7 @@ private fun PhoebeRootStateHolder(
     }
     val homeFeatureState = rememberHomeFeatureState(
         catalog = catalog,
+        catalogCacheRestored = catalogCacheRestored,
         playHistory = playHistory,
         catalogSyncInProgress = catalogSyncInProgress,
         trackHeavySectionsEnabled = trackHeavySectionsEnabled,

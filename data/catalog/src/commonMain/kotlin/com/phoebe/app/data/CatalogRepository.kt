@@ -241,6 +241,10 @@ class CatalogRepository(
 ) {
     private val json = PhoebeDataJson
     private val mutableCatalog = MutableStateFlow(CatalogSnapshot())
+
+    // Flips once the startup disk restore has published whatever it found (or found nothing),
+    // so UI can tell "catalog still loading" apart from "catalog really has no favorites".
+    private val mutableCacheRestored = MutableStateFlow(false)
     private val mutableDownloads = MutableStateFlow<List<DownloadItem>>(emptyList())
     private val downloadItemsByTrackId = linkedMapOf<String, DownloadItem>()
     private val mutableDownloadEvents = MutableSharedFlow<DownloadStatusEvent>(
@@ -442,6 +446,7 @@ class CatalogRepository(
         }
     }
     val catalog: StateFlow<CatalogSnapshot> = mutableCatalog
+    val cacheRestored: StateFlow<Boolean> = mutableCacheRestored
     val downloads: StateFlow<List<DownloadItem>> = mutableDownloads
     val downloadEvents: SharedFlow<DownloadStatusEvent> = mutableDownloadEvents.asSharedFlow()
 
@@ -669,8 +674,11 @@ class CatalogRepository(
                             downloads = restoredDownloads,
                         ),
                     )
+                    mutableCacheRestored.value = true
                 } else {
                     mutableCatalog.value = restoredShell
+                    // Shell (artists/albums/playlists incl. favorites) is usable before track hydration.
+                    mutableCacheRestored.value = true
                     trace.disk("hydrateCachedTracksFromDatabase") {
                         runCatching { hydrateCachedTracksAfterShellRestore(restoredShell) }
                             .onFailure { error ->
@@ -714,6 +722,7 @@ class CatalogRepository(
             )
         } finally {
             mutableCatalogSyncState.value = CatalogSyncState()
+            mutableCacheRestored.value = true
         }
     }
 
