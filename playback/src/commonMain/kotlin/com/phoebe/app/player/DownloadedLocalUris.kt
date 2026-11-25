@@ -1,6 +1,8 @@
 package com.phoebe.app.player
 
+import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.isLocalMediaPlayback
 import kotlin.concurrent.Volatile
 
 /**
@@ -32,4 +34,16 @@ fun List<Track>.withDownloadedLocalUris(): List<Track> {
         track.withDownloadedLocalUri().also { if (it !== track) changed = true }
     }
     return if (changed) filled else this
+}
+
+/**
+ * Queue index of the next song after [currentIndex] that plays from a file on this device,
+ * in play order (a shuffled queue is already stored in play order). Wraps to the start only
+ * when the whole queue repeats. Null when every remaining song would have to stream.
+ */
+internal fun nextDownloadedQueueIndex(queue: List<Track>, currentIndex: Int, repeat: RepeatMode): Int? {
+    if (currentIndex !in queue.indices) return null
+    val ahead = (currentIndex + 1..queue.lastIndex).asSequence()
+    val wrapped = if (repeat == RepeatMode.All) (0 until currentIndex).asSequence() else emptySequence()
+    return (ahead + wrapped).firstOrNull { queue[it].isLocalMediaPlayback() }
 }
