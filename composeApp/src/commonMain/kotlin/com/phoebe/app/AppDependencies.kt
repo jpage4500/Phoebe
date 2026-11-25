@@ -50,6 +50,8 @@ import com.phoebe.app.platform.DownloadNotifier
 import com.phoebe.app.platform.SecureCredentialStore
 import com.phoebe.app.player.AudioPlayer
 import com.phoebe.app.player.CastController
+import com.phoebe.app.player.DownloadedLocalUriHolder
+import com.phoebe.app.player.DownloadedLocalUriLookup
 import com.phoebe.app.player.PlaybackTransportService
 import com.phoebe.app.player.PlaybackRuntimeDependencies
 import com.phoebe.app.player.SystemVolumeController
@@ -267,6 +269,7 @@ class AppDependencies(
                 remoteDiscoveryClient = services.remoteDiscoveryClient,
                 remoteControlClient = services.remoteControlClient,
             )
+            DownloadedLocalUriHolder.lookup = DownloadedLocalUriLookup(services.catalogRepository::downloadedLocalUri)
             dependencies.resetStoredDataIfRevisionChanged()
             sessionRepository.restore(refreshConnections = false)
             mediaSourcesRepository.restore()

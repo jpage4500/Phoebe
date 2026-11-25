@@ -94,6 +94,7 @@ import com.phoebe.app.player.StreamingPlaybackPolicyHolder
 import com.phoebe.app.player.asPlayerState
 import com.phoebe.app.player.isPlaybackActive
 import com.phoebe.app.player.playbackOriginCandidates
+import com.phoebe.app.player.withDownloadedLocalUris
 import com.phoebe.app.player.withFreshPlaybackUrls
 import com.phoebe.app.domain.RecentSearchItem
 import com.phoebe.app.platform.MemoryPressureLevel
@@ -3341,7 +3342,8 @@ class AppState(
         cancelLibraryRadioFill()
         collectionMixGeneration++
         mutableSongRadioUndo.value = null
-        val playbackTracks = tracks.withFreshPlaybackUrls(session.value, currentPlaybackOrigin())
+        val playbackTracks = tracks.withDownloadedLocalUris()
+            .withFreshPlaybackUrls(session.value, currentPlaybackOrigin())
         if (playbackTracks.isEmpty()) return false
         val startIndex = index.coerceIn(playbackTracks.indices)
         val track = playbackTracks[startIndex]

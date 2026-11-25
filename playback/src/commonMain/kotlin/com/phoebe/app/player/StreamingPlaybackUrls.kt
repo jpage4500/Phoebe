@@ -49,7 +49,7 @@ object StreamingPlaybackPolicyHolder {
      * absolute URL exactly as before.
      */
     fun resolvePlaybackUri(track: Track): String {
-        val bound = track.boundToLivePlaybackOrigin()
+        val bound = track.withDownloadedLocalUri().boundToLivePlaybackOrigin()
         if (bound.id == directStreamTrackId) {
             return bound.localUri?.takeIf { it.isNotBlank() } ?: bound.streamUrl
         }

@@ -119,7 +119,7 @@ abstract class SimpleAudioPlayer(
     override fun play(queue: List<Track>, startIndex: Int) {
         if (queue.isEmpty()) return
         val previous = mutableState.value
-        val playbackQueue = queue.preferStickyPlaybackOrigin()
+        val playbackQueue = queue.withDownloadedLocalUris().preferStickyPlaybackOrigin()
         val index = startIndex.coerceIn(playbackQueue.indices)
         val track = playbackQueue.getOrNull(index)
         val sameQueue = tracksMatch(previous.queue, playbackQueue)
@@ -599,7 +599,7 @@ abstract class SimpleAudioPlayer(
 
     override fun addToUpNext(track: Track) {
         val state = mutableState.value
-        val preferred = listOf(track).preferStickyPlaybackOrigin().first()
+        val preferred = listOf(track).withDownloadedLocalUris().preferStickyPlaybackOrigin().first()
         val deduped = state.queue.filterNot { it.id == preferred.id }
         val insertAt = (state.currentIndex + 1).coerceIn(0, deduped.size)
         val newQueue = deduped.toMutableList().also { it.add(insertAt, preferred) }
@@ -614,7 +614,9 @@ abstract class SimpleAudioPlayer(
         if (tracks.isEmpty()) return
         val state = mutableState.value
         val existingIds = state.queue.map { it.id }.toMutableSet()
-        val additions = tracks.filter { existingIds.add(it.id) }.preferStickyPlaybackOrigin()
+        val additions = tracks.filter { existingIds.add(it.id) }
+            .withDownloadedLocalUris()
+            .preferStickyPlaybackOrigin()
         if (additions.isEmpty()) return
         val nextQueue = state.queue + additions
         mutableState.value = state.copy(queue = nextQueue)
@@ -809,10 +811,11 @@ abstract class SimpleAudioPlayer(
 
     /** Adopt queue state without touching platform output (Android Auto / MediaSession playlist). */
     protected fun adoptQueueState(queue: List<Track>, startIndex: Int, isPlaying: Boolean) {
-        val index = if (queue.isEmpty()) -1 else startIndex.coerceIn(queue.indices)
-        val track = queue.getOrNull(index)
+        val adoptedQueue = queue.withDownloadedLocalUris()
+        val index = if (adoptedQueue.isEmpty()) -1 else startIndex.coerceIn(adoptedQueue.indices)
+        val track = adoptedQueue.getOrNull(index)
         mutableState.value = mutableState.value.copy(
-            queue = queue,
+            queue = adoptedQueue,
             currentIndex = if (track == null) -1 else index,
             isPlaying = isPlaying && track != null,
             isBuffering = false,

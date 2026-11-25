@@ -134,6 +134,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import kotlinx.serialization.Serializable
+import kotlin.concurrent.Volatile
 import kotlin.random.Random
 
 private const val DownloadChunkSize = 64 * 1024
@@ -247,6 +248,13 @@ class CatalogRepository(
     private val mutableCacheRestored = MutableStateFlow(false)
     private val mutableDownloads = MutableStateFlow<List<DownloadItem>>(emptyList())
     private val downloadItemsByTrackId = linkedMapOf<String, DownloadItem>()
+
+    /**
+     * Track id -> file of every completed download. Read from any thread (the player looks tracks
+     * up here as it builds a queue), so it is replaced wholesale, never mutated in place.
+     */
+    @Volatile
+    private var completedDownloadLocalUris: Map<String, String> = emptyMap()
     private val mutableDownloadEvents = MutableSharedFlow<DownloadStatusEvent>(
         extraBufferCapacity = 32,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
@@ -448,6 +456,15 @@ class CatalogRepository(
     val catalog: StateFlow<CatalogSnapshot> = mutableCatalog
     val cacheRestored: StateFlow<Boolean> = mutableCacheRestored
     val downloads: StateFlow<List<DownloadItem>> = mutableDownloads
+
+    /**
+     * The on-device file for [trackId] when its download is complete, else null.
+     *
+     * The download table is the source of truth for what is downloaded (it drives the
+     * "downloaded" badge). A track's own row can lack the path, e.g. one written by a server
+     * refresh before upsertTrack learned to keep it, so playback fills it in from here.
+     */
+    fun downloadedLocalUri(trackId: String): String? = completedDownloadLocalUris[trackId]
     val downloadEvents: SharedFlow<DownloadStatusEvent> = mutableDownloadEvents.asSharedFlow()
 
     /**
@@ -530,6 +547,9 @@ class CatalogRepository(
     ) {
         downloadItemsByTrackId.clear()
         items.forEach { item -> downloadItemsByTrackId[item.trackId] = item }
+        completedDownloadLocalUris = buildMap {
+            items.forEach { item -> item.completedLocalUri()?.let { put(item.trackId, it) } }
+        }
         mutableDownloads.value = items
         if (syncCatalog) {
             mutableCatalog.value = withSmartPlaylists(mutableCatalog.value.copy(downloads = items))
@@ -538,6 +558,24 @@ class CatalogRepository(
 
     private fun currentDownloadItems(): List<DownloadItem> =
         downloadItemsByTrackId.values.toList()
+
+    private fun DownloadItem.completedLocalUri(): String? =
+        localUri?.takeIf { state == DownloadState.Complete && it.isNotBlank() }
+
+    /** Progress ticks don't touch the map, so only copy it when an item's file changed. */
+    private fun updateCompletedDownloadLocalUris(items: List<DownloadItem>) {
+        val current = completedDownloadLocalUris
+        if (items.none { current[it.trackId] != it.completedLocalUri() }) return
+        completedDownloadLocalUris = current.toMutableMap().apply {
+            items.forEach { item ->
+                val uri = item.completedLocalUri()
+                if (uri == null) remove(item.trackId) else put(item.trackId, uri)
+            }
+        }
+    }
+
+    private fun String?.orDownloadedLocalUri(trackId: String): String? =
+        this?.takeIf { it.isNotBlank() } ?: completedDownloadLocalUris[trackId]
 
     private val mutableCatalogRefreshing = MutableStateFlow(false)
     val catalogRefreshing: StateFlow<Boolean> = mutableCatalogRefreshing
@@ -6975,7 +7013,12 @@ class CatalogRepository(
             withContext(Dispatchers.Default) {
                 runCatalogDbWrite {
                     database.transaction {
-                        plan.deletedIds.forEach { database.downloadsQueries.delete(it) }
+                        plan.deletedIds.forEach { trackId ->
+                            database.downloadsQueries.delete(trackId)
+                            // upsertTrack keeps a stored localUri when handed null, so the
+                            // cleared rows above don't drop it; clear it explicitly.
+                            database.catalogQueries.clearTrackLocalUri(trackId)
+                        }
                     }
                 }
             }
@@ -7530,6 +7573,7 @@ class CatalogRepository(
         latestItems.forEach { item ->
             downloadItemsByTrackId[item.trackId] = item
         }
+        updateCompletedDownloadLocalUris(latestItems)
         mutableDownloadEvents.tryEmit(DownloadStatusEvent(items = latestItems.map { it.toUiDownloadEventItem() }))
         if (publishSnapshot) {
             val downloads = currentDownloadItems()
@@ -7884,7 +7928,7 @@ class CatalogRepository(
             downloadUrl = downloadUrl,
             thumbUrl = thumbUrl,
             localArtworkUri = localArtworkUri,
-            localUri = localUri,
+            localUri = localUri.orDownloadedLocalUri(id),
             year = year?.toInt(),
             genre = genre,
             mood = mood,
@@ -8812,7 +8856,7 @@ class CatalogRepository(
                     downloadUrl = row.downloadUrl,
                     thumbUrl = row.thumbUrl,
                     localArtworkUri = row.localArtworkUri,
-                    localUri = row.localUri,
+                    localUri = row.localUri.orDownloadedLocalUri(row.id),
                     year = row.year?.toInt(),
                     genre = row.genre,
                     mood = row.mood,
