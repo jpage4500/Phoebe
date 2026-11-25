@@ -1,6 +1,7 @@
 package com.phoebe.app
 
 import com.phoebe.app.data.signInErrorMessage
+import com.phoebe.app.domain.DownloadMoveState
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.AppSettings
@@ -408,6 +409,9 @@ class AppState(
 
     private val mutableDownloadDirectory = MutableStateFlow<String?>(null)
     val downloadDirectory: StateFlow<String?> = mutableDownloadDirectory
+    private val mutableDownloadMove = MutableStateFlow<DownloadMoveState?>(null)
+    val downloadMove: StateFlow<DownloadMoveState?> = mutableDownloadMove
+    private var downloadMoveJob: Job? = null
 
     private val mutableActiveDownloadJobCount = MutableStateFlow(0)
     val activeDownloadJobCount: StateFlow<Int> = mutableActiveDownloadJobCount
@@ -4287,6 +4291,54 @@ class AppState(
         val result = dependencies.downloadService.setDownloadDirectory(uri)
         mutableDownloadDirectory.value = result.uri
         mutableMessage.value = result.message
+        if (downloadMoveJob?.isActive == true) return@launch
+        // Songs already downloaded stay in the old folder unless the user chooses to move them.
+        val outside = runCatching { dependencies.catalogRepository.downloadsOutsideCurrentFolder() }.getOrDefault(emptyList())
+        mutableDownloadMove.value = outside.size.takeIf { it > 0 }?.let { DownloadMoveState.Prompt(it) }
+    }
+
+    /** Moves every downloaded song that's outside the current folder into it, one at a time. */
+    fun moveDownloadsToCurrentFolder() {
+        if (downloadMoveJob?.isActive == true) return
+        downloadMoveJob = scope.launch {
+            val items = runCatching { dependencies.catalogRepository.downloadsOutsideCurrentFolder() }.getOrDefault(emptyList())
+            var done = 0
+            var failed = 0
+            mutableDownloadMove.value = DownloadMoveState.Moving(done = 0, total = items.size, failed = 0)
+            try {
+                for (item in items) {
+                    val moved = try {
+                        dependencies.catalogRepository.moveDownloadToCurrentFolder(item)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Throwable) {
+                        PhoebeLog.d("AppState") { "move download failed trackId=${item.trackId}: ${error.message}" }
+                        false
+                    }
+                    done++
+                    if (!moved) failed++
+                    mutableDownloadMove.value = DownloadMoveState.Moving(done = done, total = items.size, failed = failed)
+                }
+                mutableDownloadMove.value = DownloadMoveState.Finished(moved = done - failed, failed = failed, stopped = false)
+            } catch (error: CancellationException) {
+                mutableDownloadMove.value = DownloadMoveState.Finished(moved = done - failed, failed = failed, stopped = true)
+                throw error
+            }
+        }
+    }
+
+    /** Stops a move in progress; songs already moved stay moved, the rest stay in the old folder. */
+    fun stopDownloadMove() {
+        downloadMoveJob?.cancel()
+    }
+
+    fun dismissDownloadMove() {
+        if (downloadMoveJob?.isActive == true) return
+        mutableDownloadMove.value = null
+    }
+
+    suspend fun backfillDownloadSizes() {
+        runCatching { dependencies.catalogRepository.backfillDownloadSizes() }
     }
 
     fun resetDownloadDirectory() = setDownloadDirectory(null)
@@ -4315,6 +4367,9 @@ class AppState(
     fun deleteDownloadsByTrackIds(trackIds: Set<String>) = scope.launch {
         mutableMessage.value = dependencies.downloadService.deleteDownloadsForTrackIds(trackIds)
     }
+
+    suspend fun cachedTracksByIds(trackIds: Set<String>): Map<String, Track> =
+        runCatching { dependencies.catalogRepository.cachedTracksByIds(trackIds) }.getOrDefault(emptyMap())
 
     fun deleteDownloads(tracks: List<Track>) = scope.launch {
         deleteResolvedDownloads(tracks)

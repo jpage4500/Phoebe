@@ -264,6 +264,11 @@ actual class PlatformStorage actual constructor() {
 
     actual fun defaultDownloadDirectoryLabel(): String = "Browser storage"
 
+    actual suspend fun uriSize(uri: String): Long? = readUriBytes(uri)?.size?.toLong()
+
+    // The download folder can't be changed on this platform, so nothing ever needs moving.
+    actual suspend fun isInDownloadDirectory(uri: String): Boolean = true
+
     private fun storageKey(name: String): String = "phoebe:$name"
 
     private suspend fun suspendWebDownloadResult(
@@ -294,7 +299,7 @@ actual class DownloadNotifier actual constructor() {
 }
 
 @Composable
-actual fun rememberPickDownloadDirectory(onPicked: (String?) -> Unit): () -> Unit =
+actual fun rememberPickDownloadDirectory(initialDirectory: String?, onPicked: (String?) -> Unit): () -> Unit =
     remember(onPicked) {
         { onPicked(null) }
     }

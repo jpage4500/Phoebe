@@ -6879,6 +6879,93 @@ class CatalogRepository(
         return deleteDownloadsForTrackIds(trackIds, tracks)
     }
 
+    /**
+     * Fills in sizes for completed downloads saved before sizes were kept, by asking storage for each
+     * file's size. Returns how many were updated.
+     */
+    suspend fun backfillDownloadSizes(): Int {
+        val missing = downloadStatusMutex.withLock { currentDownloadItems() }.filter { item ->
+            item.state == DownloadState.Complete &&
+                item.downloadedBytes <= 0L &&
+                (item.totalBytes ?: 0L) <= 0L &&
+                !item.localUri.isNullOrBlank()
+        }
+        if (missing.isEmpty()) return 0
+        val sized = missing.mapNotNull { item ->
+            val bytes = runCatching { storage.uriSize(item.localUri.orEmpty()) }.getOrNull()?.takeIf { it > 0L }
+            bytes?.let { item.copy(downloadedBytes = it, totalBytes = it) }
+        }
+        if (sized.isEmpty()) return 0
+        return downloadStatusMutex.withLock {
+            // Skip songs that were deleted or moved while their sizes were being read.
+            val unchanged = sized.filter { item ->
+                downloadItemsByTrackId[item.trackId]?.let { now ->
+                    now.state == DownloadState.Complete && now.localUri == item.localUri
+                } == true
+            }
+            publishDownloadItems(unchanged, persist = true, syncCatalog = false)
+            unchanged.size
+        }
+    }
+
+    /** Completed downloads whose files are outside the current download folder, e.g. after the folder changed. */
+    suspend fun downloadsOutsideCurrentFolder(): List<DownloadItem> {
+        val completed = downloadStatusMutex.withLock { currentDownloadItems() }
+            .filter { it.state == DownloadState.Complete && !it.localUri.isNullOrBlank() }
+        return completed.filterNot { item ->
+            runCatching { storage.isInDownloadDirectory(item.localUri.orEmpty()) }.getOrDefault(true)
+        }
+    }
+
+    /**
+     * Copies one downloaded song into the current download folder, points the song at the copy, then
+     * deletes the original. Returns false when the original couldn't be read or the copy couldn't be written;
+     * the song then stays where it was.
+     */
+    suspend fun moveDownloadToCurrentFolder(item: DownloadItem): Boolean {
+        val oldUri = item.localUri?.takeIf { it.isNotBlank() } ?: return false
+        if (storage.isInDownloadDirectory(oldUri)) return true
+        val track = downloadedRemoteTracksForTrackIds(setOf(item.trackId)).firstOrNull()
+        val targetPath = item.targetPath.ifBlank { track?.let(::downloadPathFor).orEmpty() }
+        if (targetPath.isBlank()) return false
+        val bytes = storage.readUriBytes(oldUri) ?: return false
+        val newUri = storage.writeBytes(targetPath, bytes)
+        if (newUri == oldUri) return true
+        track?.let { updateTracksOfflineInfo(listOf(it.copy(localUri = newUri))) }
+        downloadStatusMutex.withLock {
+            val current = downloadItemsByTrackId[item.trackId] ?: item
+            publishDownloadItems(
+                listOf(current.copy(localUri = newUri, updatedAtMs = currentTimeMs())),
+                persist = true,
+                syncCatalog = true,
+            )
+        }
+        runCatching { storage.deleteUri(oldUri) }.onFailure { error ->
+            if (error is CancellationException) throw error
+            PhoebeLog.d("CatalogRepository") { "moved download but couldn't delete original: ${error.message}" }
+        }
+        return true
+    }
+
+    /** Cached catalog tracks for [trackIds] (in-memory snapshot first, then the database), keyed by id. */
+    suspend fun cachedTracksByIds(trackIds: Set<String>): Map<String, Track> {
+        if (trackIds.isEmpty()) return emptyMap()
+        val found = linkedMapOf<String, Track>()
+        mutableCatalog.value.tracksByParent.values
+            .asSequence()
+            .flatten()
+            .filter { it.id in trackIds }
+            .forEach { found.putIfAbsent(it.id, it) }
+        val missing = trackIds - found.keys
+        missing.chunked(500).forEach { ids ->
+            database.catalogQueries
+                .selectTracksByIds(ids)
+                .awaitAsList()
+                .forEach { row -> row.toTrack().let { found.putIfAbsent(it.id, it) } }
+        }
+        return found
+    }
+
     suspend fun deleteDownloadsForTrackIds(trackIds: Set<String>): Int {
         if (trackIds.isEmpty()) return 0
         return deleteDownloadsForTrackIds(trackIds, emptyList())
@@ -7525,8 +7612,12 @@ class CatalogRepository(
         downloadedBytes: Long = 0L,
         totalBytes: Long? = null,
         errorMessage: String? = null,
-    ): DownloadItem =
-        DownloadItem(
+    ): DownloadItem {
+        // Completion paths don't know the file size. Keep the bytes recorded while it downloaded (or by an
+        // earlier size backfill) so the storage total doesn't drop back to zero when a song finishes.
+        val previous = if (state == DownloadState.Complete && downloadedBytes <= 0L) downloadItemsByTrackId[id] else null
+        val keptBytes = previous?.let { maxOf(it.downloadedBytes, it.totalBytes ?: 0L) } ?: 0L
+        return DownloadItem(
             trackId = id,
             title = title,
             artist = artist,
@@ -7535,11 +7626,12 @@ class CatalogRepository(
             localUri = localUri,
             downloadUrl = downloadUrl,
             targetPath = downloadPathFor(this),
-            downloadedBytes = downloadedBytes,
-            totalBytes = totalBytes,
+            downloadedBytes = if (keptBytes > 0L) keptBytes else downloadedBytes,
+            totalBytes = totalBytes ?: previous?.totalBytes?.takeIf { it > 0L } ?: keptBytes.takeIf { it > 0L },
             updatedAtMs = currentTimeMs(),
             error = errorMessage,
         )
+    }
 
     private fun DownloadRow.toDownloadItem(): DownloadItem =
         DownloadItem(

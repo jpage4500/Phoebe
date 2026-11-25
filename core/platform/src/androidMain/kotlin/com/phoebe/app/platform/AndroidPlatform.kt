@@ -465,6 +465,33 @@ actual class PlatformStorage actual constructor() {
 
     actual fun defaultDownloadDirectoryLabel(): String = defaultDownloadDirectory().absolutePath
 
+    actual suspend fun uriSize(uri: String): Long? = withContext(Dispatchers.IO) {
+        val parsed = Uri.parse(uri)
+        when (parsed.scheme) {
+            "content" -> runCatching {
+                DocumentFile.fromSingleUri(AndroidContextHolder.application, parsed)?.length()?.takeIf { it > 0L }
+            }.getOrNull()
+            "file" -> File(parsed.path.orEmpty()).takeIf { it.isFile }?.length()
+            else -> null
+        }
+    }
+
+    actual suspend fun isInDownloadDirectory(uri: String): Boolean = withContext(Dispatchers.IO) {
+        val parsed = Uri.parse(uri)
+        val tree = readDownloadDirectory()?.let(Uri::parse)
+        if (tree == null) {
+            // Default folder: a plain file under the app's Music directory.
+            if (parsed.scheme != "file") return@withContext false
+            val root = runCatching { defaultDownloadDirectory().canonicalFile }.getOrNull() ?: return@withContext false
+            val file = runCatching { File(parsed.path.orEmpty()).canonicalFile }.getOrNull() ?: return@withContext false
+            return@withContext file.path.startsWith(root.path + File.separator)
+        }
+        if (parsed.scheme != "content" || parsed.authority != tree.authority) return@withContext false
+        val rootId = runCatching { DocumentsContract.getTreeDocumentId(tree) }.getOrNull() ?: return@withContext false
+        val documentId = runCatching { DocumentsContract.getDocumentId(parsed) }.getOrNull() ?: return@withContext false
+        documentId == rootId || documentId.startsWith(rootId.trimEnd('/') + "/")
+    }
+
     private fun defaultDownloadDirectory(): File {
         val context = AndroidContextHolder.application
         return (context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: root)
@@ -658,7 +685,7 @@ private const val DownloadNotificationChannelId = "phoebe_downloads"
 private const val DownloadNotificationId = 2001
 
 @Composable
-actual fun rememberPickDownloadDirectory(onPicked: (String?) -> Unit): () -> Unit {
+actual fun rememberPickDownloadDirectory(initialDirectory: String?, onPicked: (String?) -> Unit): () -> Unit {
     val activity = checkNotNull(LocalActivity.current) {
         "rememberPickDownloadDirectory must be hosted in an Activity."
     }
@@ -674,10 +701,25 @@ actual fun rememberPickDownloadDirectory(onPicked: (String?) -> Unit): () -> Uni
         }
         onPicked(uri?.toString())
     }
-    return remember(launcher) {
-        { launcher.launch(null) }
+    return remember(launcher, initialDirectory) {
+        { launcher.launch(initialDirectory?.let(::downloadPickerStartUri) ?: defaultPickerStartUri()) }
     }
 }
+
+/**
+ * The picker can only start inside a folder the user granted before, so turn the saved tree URI into a
+ * document URI for EXTRA_INITIAL_URI. The app-private default folder can't be shown in the picker.
+ */
+private fun downloadPickerStartUri(saved: String): Uri? = runCatching {
+    val tree = Uri.parse(saved)
+    if (tree.scheme != "content" || !DocumentsContract.isTreeUri(tree)) return@runCatching null
+    DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+}.getOrNull()
+
+/** With no saved folder, open the picker in the shared Music folder instead of the storage root. */
+private fun defaultPickerStartUri(): Uri? = runCatching {
+    DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:${Environment.DIRECTORY_MUSIC}")
+}.getOrNull()
 
 private const val DownloadDirectoryFile = "download-location.txt"
 

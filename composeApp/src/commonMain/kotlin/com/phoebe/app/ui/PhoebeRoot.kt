@@ -230,6 +230,8 @@ import com.phoebe.app.feature.search.LocalServerSearch
 import com.phoebe.app.feature.search.ServerSearchActions
 import com.phoebe.app.feature.search.SavedSearchActions
 import com.phoebe.app.feature.search.rememberSearchHistoryState
+import com.phoebe.app.feature.settings.DownloadManagerServices
+import com.phoebe.app.feature.settings.LocalDownloadManagerServices
 import com.phoebe.app.feature.settings.DownloadManagerUiSummary
 import com.phoebe.app.feature.settings.SettingsCategory
 import com.phoebe.app.domain.ShellPlaybackState
@@ -1420,6 +1422,17 @@ private fun PhoebeRootStateHolder(
         )
     }
 
+    val downloadManagerServices = remember(state) {
+        DownloadManagerServices(
+            lookupTracks = state::cachedTracksByIds,
+            backfillSizes = state::backfillDownloadSizes,
+            moveState = state.downloadMove,
+            onMoveConfirm = state::moveDownloadsToCurrentFolder,
+            onMoveStop = state::stopDownloadMove,
+            onMoveDismiss = state::dismissDownloadMove,
+        )
+    }
+
     CompositionLocalProvider(
         LocalCatalogHasContent provides catalogHasContent,
         LocalCatalogSyncState provides catalogSyncState,
@@ -1430,6 +1443,7 @@ private fun PhoebeRootStateHolder(
         LocalTracksLoading provides tracksLoading,
         LocalDownloadStatus provides downloadStatus,
         LocalDownloadActions provides downloadActions,
+        LocalDownloadManagerServices provides downloadManagerServices,
         LocalNowPlaying provides nowPlaying,
         LocalPlayHistory provides playHistory,
         LocalNowMs provides nowMs,
@@ -3440,7 +3454,8 @@ private fun List<DownloadItem>.toDownloadManagerUiSummary(activeDownloadJobCount
         ),
         complete = count { it.state == DownloadState.Complete },
         failed = count { it.state == DownloadState.Failed },
-        estimatedBytes = filter { it.state == DownloadState.Complete }.sumOf { it.downloadedBytes },
+        estimatedBytes = filter { it.state == DownloadState.Complete }
+            .sumOf { item -> item.downloadedBytes.takeIf { it > 0L } ?: item.totalBytes?.takeIf { it > 0L } ?: 0L },
     )
 
 private enum class MiniPlayerDragMode { Undecided, Expand, Dismiss }

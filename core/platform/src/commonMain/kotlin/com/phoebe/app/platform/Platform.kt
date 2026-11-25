@@ -89,6 +89,10 @@ expect class PlatformStorage() {
     suspend fun readDownloadDirectory(): String?
     suspend fun writeDownloadDirectory(uri: String?)
     fun defaultDownloadDirectoryLabel(): String
+    /** Size in bytes of the downloaded file at [uri], or null when it can't be read. */
+    suspend fun uriSize(uri: String): Long?
+    /** True when [uri] is a file inside the current download folder (the chosen one, or the default). */
+    suspend fun isInDownloadDirectory(uri: String): Boolean
 }
 
 interface PlatformByteSink {
@@ -108,7 +112,7 @@ expect suspend fun platformStreamHttpDownloadToStorage(
 ): String?
 
 @Composable
-expect fun rememberPickDownloadDirectory(onPicked: (String?) -> Unit): () -> Unit
+expect fun rememberPickDownloadDirectory(initialDirectory: String? = null, onPicked: (String?) -> Unit): () -> Unit
 
 expect fun openExternalUrl(url: String)
 
