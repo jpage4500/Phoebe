@@ -247,8 +247,9 @@ class PlexPlaybackReporterTest {
     @Test
     fun navidromeScrobblesWhenPlaybackPassesThreshold() = runTest {
         val scrobbles = MutableStateFlow<List<Map<String, String>>>(emptyList())
+        val nowPlaying = MutableStateFlow<List<Map<String, String>>>(emptyList())
         val audioPlayer = FakeAudioPlayer()
-        val reporter = newNavidromeReporter(subsonicEngine(scrobbles), audioPlayer)
+        val reporter = newNavidromeReporter(subsonicEngine(scrobbles, nowPlaying), audioPlayer)
         val scopeJob = SupervisorJob(coroutineContext[Job])
         val scope = CoroutineScope(coroutineContext + scopeJob)
         val track = navidromeTrack()
@@ -270,6 +271,8 @@ class PlexPlaybackReporterTest {
 
             assertEquals("tr1", scrobbles.value.single()["id"])
             assertEquals("true", scrobbles.value.single()["submission"])
+            // Playing the track also reports it as now playing, once.
+            assertEquals("tr1", nowPlaying.value.single()["id"])
         } finally {
             scopeJob.cancelAndJoin()
         }
@@ -387,14 +390,16 @@ class PlexPlaybackReporterTest {
 
     private fun subsonicEngine(
         scrobbles: MutableStateFlow<List<Map<String, String>>>,
+        nowPlaying: MutableStateFlow<List<Map<String, String>>> = MutableStateFlow(emptyList()),
     ): MockEngine = testMockEngine { request ->
         when (request.url.encodedPath) {
             "/rest/scrobble.view" -> {
-                scrobbles.update {
-                    it + request.url.parameters.entries().associate { entry ->
-                        entry.key to entry.value.last()
-                    }
+                val params = request.url.parameters.entries().associate { entry ->
+                    entry.key to entry.value.last()
                 }
+                // submission=false is the "now playing" notification, not a played scrobble.
+                val target = if (params["submission"] == "false") nowPlaying else scrobbles
+                target.update { it + params }
                 respondJson("""{ "subsonic-response": { "status": "ok" } }""")
             }
             else -> respond("", HttpStatusCode.NotFound)
