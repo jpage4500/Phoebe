@@ -1,6 +1,7 @@
 package com.phoebe.app
 
 import com.phoebe.app.data.signInErrorMessage
+import com.phoebe.app.domain.DownloadMoveState
 import com.phoebe.app.domain.Album
 import com.phoebe.app.domain.AudioAnalysisFrame
 import com.phoebe.app.domain.AppSettings
@@ -77,6 +78,7 @@ import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.data.ArtworkOriginHolder
 import com.phoebe.app.data.isLocalOnlyServerOrigin
 import com.phoebe.app.data.BackupRestoreMode
+import com.phoebe.app.data.TextExport
 import com.phoebe.app.data.JellyfinQuickConnectResult
 import com.phoebe.app.data.JellyfinPlayHistorySyncResult
 import com.phoebe.app.data.ListenBrainzFeedbackScore
@@ -94,21 +96,24 @@ import com.phoebe.app.player.StreamingPlaybackPolicyHolder
 import com.phoebe.app.player.asPlayerState
 import com.phoebe.app.player.isPlaybackActive
 import com.phoebe.app.player.playbackOriginCandidates
+import com.phoebe.app.player.withDownloadedLocalUris
 import com.phoebe.app.player.withFreshPlaybackUrls
 import com.phoebe.app.domain.RecentSearchItem
 import com.phoebe.app.platform.MemoryPressureLevel
 import com.phoebe.app.platform.PhoebeAppLifecycle
 import com.phoebe.app.platform.PhoebeLog
-import com.phoebe.app.platform.shouldDeferCatalogMemoryUpdates
+import com.phoebe.app.platform.TextFileOpenResult
+import com.phoebe.app.platform.TextFileSaveResult
 import com.phoebe.app.platform.currentNetworkIdentity
 import com.phoebe.app.platform.currentNetworkMeteringStatus
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.defaultDownloadWifiOnly
+import com.phoebe.app.platform.discoverJellyfinServers as discoverJellyfinServersOnNetwork
 import com.phoebe.app.platform.isDebugBuild
 import com.phoebe.app.platform.isDesktopPlatform
-import com.phoebe.app.platform.discoverJellyfinServers as discoverJellyfinServersOnNetwork
 import com.phoebe.app.platform.openExternalUrl
 import com.phoebe.app.platform.requestNotificationPermission
+import com.phoebe.app.platform.shouldDeferCatalogMemoryUpdates
 import com.phoebe.app.ui.AppNavigationRequest
 import com.phoebe.app.ui.CollectionMixSeed
 import com.phoebe.app.updates.AppUpdateState
@@ -407,6 +412,9 @@ class AppState(
 
     private val mutableDownloadDirectory = MutableStateFlow<String?>(null)
     val downloadDirectory: StateFlow<String?> = mutableDownloadDirectory
+    private val mutableDownloadMove = MutableStateFlow<DownloadMoveState?>(null)
+    val downloadMove: StateFlow<DownloadMoveState?> = mutableDownloadMove
+    private var downloadMoveJob: Job? = null
 
     private val mutableActiveDownloadJobCount = MutableStateFlow(0)
     val activeDownloadJobCount: StateFlow<Int> = mutableActiveDownloadJobCount
@@ -2846,7 +2854,7 @@ class AppState(
      * is replaced so playback continues uninterrupted, and an Undo snackbar restores the old queue.
      */
     fun playSongRadio(track: Track) = scope.launch {
-        if (!track.id.supportsArtistRadio()) {
+        if (!supportsSongRadio(track)) {
             mutableMessage.value = "Radio is available for streaming-library songs."
             return@launch
         }
@@ -2911,8 +2919,9 @@ class AppState(
         return true
     }
 
-    /** Song radio needs a streaming server that can suggest similar tracks. */
-    fun supportsSongRadio(track: Track): Boolean = track.id.supportsArtistRadio()
+    /** Song radio needs a streaming server that can reliably suggest similar tracks. */
+    fun supportsSongRadio(track: Track): Boolean =
+        SongRadioCatalogPrefixes.any { track.id.startsWith(it) }
 
     fun undoSongRadio() {
         val undo = mutableSongRadioUndo.value ?: return
@@ -3340,7 +3349,8 @@ class AppState(
         cancelLibraryRadioFill()
         collectionMixGeneration++
         mutableSongRadioUndo.value = null
-        val playbackTracks = tracks.withFreshPlaybackUrls(session.value, currentPlaybackOrigin())
+        val playbackTracks = tracks.withDownloadedLocalUris()
+            .withFreshPlaybackUrls(session.value, currentPlaybackOrigin())
         if (playbackTracks.isEmpty()) return false
         val startIndex = index.coerceIn(playbackTracks.indices)
         val track = playbackTracks[startIndex]
@@ -4284,6 +4294,54 @@ class AppState(
         val result = dependencies.downloadService.setDownloadDirectory(uri)
         mutableDownloadDirectory.value = result.uri
         mutableMessage.value = result.message
+        if (downloadMoveJob?.isActive == true) return@launch
+        // Songs already downloaded stay in the old folder unless the user chooses to move them.
+        val outside = runCatching { dependencies.catalogRepository.downloadsOutsideCurrentFolder() }.getOrDefault(emptyList())
+        mutableDownloadMove.value = outside.size.takeIf { it > 0 }?.let { DownloadMoveState.Prompt(it) }
+    }
+
+    /** Moves every downloaded song that's outside the current folder into it, one at a time. */
+    fun moveDownloadsToCurrentFolder() {
+        if (downloadMoveJob?.isActive == true) return
+        downloadMoveJob = scope.launch {
+            val items = runCatching { dependencies.catalogRepository.downloadsOutsideCurrentFolder() }.getOrDefault(emptyList())
+            var done = 0
+            var failed = 0
+            mutableDownloadMove.value = DownloadMoveState.Moving(done = 0, total = items.size, failed = 0)
+            try {
+                for (item in items) {
+                    val moved = try {
+                        dependencies.catalogRepository.moveDownloadToCurrentFolder(item)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Throwable) {
+                        PhoebeLog.d("AppState") { "move download failed trackId=${item.trackId}: ${error.message}" }
+                        false
+                    }
+                    done++
+                    if (!moved) failed++
+                    mutableDownloadMove.value = DownloadMoveState.Moving(done = done, total = items.size, failed = failed)
+                }
+                mutableDownloadMove.value = DownloadMoveState.Finished(moved = done - failed, failed = failed, stopped = false)
+            } catch (error: CancellationException) {
+                mutableDownloadMove.value = DownloadMoveState.Finished(moved = done - failed, failed = failed, stopped = true)
+                throw error
+            }
+        }
+    }
+
+    /** Stops a move in progress; songs already moved stay moved, the rest stay in the old folder. */
+    fun stopDownloadMove() {
+        downloadMoveJob?.cancel()
+    }
+
+    fun dismissDownloadMove() {
+        if (downloadMoveJob?.isActive == true) return
+        mutableDownloadMove.value = null
+    }
+
+    suspend fun backfillDownloadSizes() {
+        runCatching { dependencies.catalogRepository.backfillDownloadSizes() }
     }
 
     fun resetDownloadDirectory() = setDownloadDirectory(null)
@@ -4312,6 +4370,9 @@ class AppState(
     fun deleteDownloadsByTrackIds(trackIds: Set<String>) = scope.launch {
         mutableMessage.value = dependencies.downloadService.deleteDownloadsForTrackIds(trackIds)
     }
+
+    suspend fun cachedTracksByIds(trackIds: Set<String>): Map<String, Track> =
+        runCatching { dependencies.catalogRepository.cachedTracksByIds(trackIds) }.getOrDefault(emptyMap())
 
     fun deleteDownloads(tracks: List<Track>) = scope.launch {
         deleteResolvedDownloads(tracks)
@@ -4554,42 +4615,74 @@ class AppState(
         mutableMessage.value = dependencies.catalogItemMutationService.toggleFavoritePlaylist(session.value, playlist)
     }
 
-    fun exportFavoritePlaylists() = scope.launch {
-        mutableMessage.value = dependencies.catalogItemMutationService.exportFavoritePlaylists()
-    }
-
-    fun importFavoritePlaylists() = scope.launch {
-        mutableMessage.value = dependencies.catalogItemMutationService.importFavoritePlaylists()
-    }
-
-    fun exportRadioStations() = scope.launch {
-        mutableMessage.value = dependencies.catalogItemMutationService.exportRadioStations()
-    }
-
-    fun importRadioStations() = scope.launch {
-        mutableMessage.value = dependencies.catalogItemMutationService.importRadioStations()
-    }
-
-    fun exportBackupPackage() = scope.launch {
-        val payload = dependencies.importExportService.exportBackupPackage()
-        runCatching {
-            dependencies.platformStorage.writeText("exports/phoebe-backup.json", payload)
-        }.fold(
-            onSuccess = { mutableMessage.value = "Exported Phoebe backup package." },
-            onFailure = { error -> mutableMessage.value = error.message ?: "Couldn't export Phoebe backup." },
-        )
-    }
-
-    fun importBackupPackage(mode: BackupRestoreMode = BackupRestoreMode.Merge) = scope.launch {
-        val payload = dependencies.platformStorage.readText("exports/phoebe-backup.json")
-        if (payload.isNullOrBlank()) {
-            mutableMessage.value = "No Phoebe backup export found."
-            return@launch
+    /** Builds the export for [file], or shows why there's nothing to export and returns null. */
+    suspend fun prepareUserDataExport(file: UserDataFile): TextExport? {
+        val export = runCatching {
+            when (file) {
+                UserDataFile.Backup -> TextExport(dependencies.importExportService.exportBackupPackage(), itemCount = 1)
+                UserDataFile.FavoritePlaylists -> dependencies.catalogItemMutationService.favoritePlaylistsExport()
+                UserDataFile.RadioStations -> dependencies.catalogItemMutationService.radioStationsExport()
+            }
+        }.getOrElse { error ->
+            surfaceTransientNotice(error.message ?: "Couldn't export ${file.label}.")
+            return null
         }
-        val preview = dependencies.importExportService.restoreBackupPackage(payload, mode)
-        dependencies.catalogRepository.refreshSmartPlaylists()
-        mutableMessage.value = "Restored ${preview.smartPlaylistCount} smart playlists, " +
-            "${preview.savedSearchCount} saved searches, and ${preview.metadataOverrideCount} metadata overrides."
+        if (export == null) {
+            surfaceTransientNotice(
+                when (file) {
+                    UserDataFile.Backup -> "Couldn't export ${file.label}."
+                    UserDataFile.FavoritePlaylists -> "No favorite playlists to export."
+                    UserDataFile.RadioStations -> "No manually added radio stations to export."
+                },
+            )
+        }
+        return export
+    }
+
+    fun onUserDataExportSaved(file: UserDataFile, export: TextExport, result: TextFileSaveResult) {
+        when (result) {
+            TextFileSaveResult.Cancelled -> Unit
+            TextFileSaveResult.Saved -> surfaceTransientNotice(
+                when (file) {
+                    UserDataFile.Backup -> "Saved Phoebe backup."
+                    UserDataFile.FavoritePlaylists -> "Saved ${export.itemCount} favorite playlists."
+                    UserDataFile.RadioStations -> "Saved ${export.itemCount} radio stations."
+                },
+            )
+            is TextFileSaveResult.Failed -> surfaceTransientNotice(
+                "Couldn't save ${file.label}" + (result.message?.let { ": $it" } ?: "."),
+            )
+        }
+    }
+
+    fun importUserDataFile(
+        file: UserDataFile,
+        result: TextFileOpenResult,
+        mode: BackupRestoreMode = BackupRestoreMode.Merge,
+    ) = scope.launch {
+        val content = when (result) {
+            TextFileOpenResult.Cancelled -> return@launch
+            is TextFileOpenResult.Failed -> {
+                surfaceTransientNotice("Couldn't read that file" + (result.message?.let { ": $it" } ?: "."))
+                return@launch
+            }
+            is TextFileOpenResult.Opened -> result.text
+        }
+        val notice = when (file) {
+            UserDataFile.FavoritePlaylists -> dependencies.catalogItemMutationService.importFavoritePlaylists(content)
+            UserDataFile.RadioStations -> dependencies.catalogItemMutationService.importRadioStations(content)
+            UserDataFile.Backup -> {
+                val preview = dependencies.importExportService.restoreBackupPackage(content, mode)
+                if (preview == null) {
+                    "That file isn't a Phoebe backup."
+                } else {
+                    dependencies.catalogRepository.refreshSmartPlaylists()
+                    "Restored ${preview.smartPlaylistCount} smart playlists, " +
+                        "${preview.savedSearchCount} saved searches, and ${preview.metadataOverrideCount} metadata overrides."
+                }
+            }
+        }
+        surfaceTransientNotice(notice)
     }
 
     fun addLocalFolderFromUri(rootUri: String?) = scope.launch {
@@ -4900,6 +4993,10 @@ private const val KeepPlayingRemainingThresholdMs = 8L * 60L * 1000L
 private const val KeepPlayingEndedTailSlackMs = 1_500L
 private const val KeepPlayingNativeSeedItemLimit = 4
 private val ArtistRadioCatalogPrefixes = listOf("plex:", "jellyfin:", "emby:", "navidrome:")
+
+// Plex is left out: its /similar endpoint only returns tracks once Sonic Analysis (Plex Pass) has run
+// on the library, and there's no cheap way to tell beforehand, so the Radio button would often fail.
+private val SongRadioCatalogPrefixes = listOf("jellyfin:", "emby:", "navidrome:")
 private const val KeepPlayingNativeCandidateTimeoutMs = 5_000L
 private const val KeepPlayingNativeItemsBudgetMs = 4_000L
 private const val KeepPlayingNativeItemTimeoutMs = 1_200L

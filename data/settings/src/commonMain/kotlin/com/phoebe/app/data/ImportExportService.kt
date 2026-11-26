@@ -7,14 +7,22 @@ import com.phoebe.app.domain.SmartPlaylist
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class PhoebeBackupPackage(
-    val version: Int = CurrentVersion,
+    // Always written so a backup file can be told apart from other Phoebe exports when it's opened.
+    @EncodeDefault val format: String = FormatId,
+    @EncodeDefault val version: Int = CurrentVersion,
     val settings: AppSettings = AppSettings.Default,
     val smartPlaylists: List<SmartPlaylist> = emptyList(),
     val savedSearches: List<SavedSearch> = emptyList(),
@@ -22,6 +30,7 @@ data class PhoebeBackupPackage(
 ) {
     companion object {
         const val CurrentVersion = 3
+        const val FormatId = "phoebe-backup"
     }
 }
 
@@ -61,8 +70,9 @@ class ImportExportService(
         )
     }
 
-    suspend fun restoreBackupPackage(payload: String, mode: BackupRestoreMode): BackupRestorePreview {
-        val backup = decodeBackup(payload) ?: return BackupRestorePreview()
+    /** Restores [payload], or returns null without changing anything when it isn't a readable Phoebe backup. */
+    suspend fun restoreBackupPackage(payload: String, mode: BackupRestoreMode): BackupRestorePreview? {
+        val backup = decodeBackup(payload) ?: return null
         if (mode == BackupRestoreMode.Replace) {
             userArtifactsRepository.clearUserArtifacts()
         }
@@ -87,6 +97,9 @@ class ImportExportService(
 
     private fun decodeBackup(payload: String): PhoebeBackupPackage? =
         try {
+            // Every field has a default, so any JSON object would otherwise decode as an empty backup,
+            // and restoring one in Replace mode would wipe the user's data.
+            if (!looksLikeBackup(PhoebeDataJson.parseToJsonElement(payload).jsonObject)) return null
             PhoebeDataJson.decodeFromString<PhoebeBackupPackage>(payload)
                 .takeIf { it.version <= PhoebeBackupPackage.CurrentVersion }
         } catch (_: SerializationException) {
@@ -94,4 +107,13 @@ class ImportExportService(
         } catch (_: IllegalArgumentException) {
             null
         }
+}
+
+private val LegacyBackupKeys = setOf("settings", "smartPlaylists", "savedSearches", "localMetadataOverrides")
+
+// Backups written before the format marker existed are recognized by their own top-level keys.
+private fun looksLikeBackup(json: JsonObject): Boolean {
+    val format = (json["format"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    if (format != null) return format == PhoebeBackupPackage.FormatId
+    return json.keys.any { it in LegacyBackupKeys }
 }

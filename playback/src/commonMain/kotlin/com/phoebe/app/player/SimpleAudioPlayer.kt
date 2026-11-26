@@ -9,6 +9,7 @@ import com.phoebe.app.domain.PlayerState
 import com.phoebe.app.domain.RepeatMode
 import com.phoebe.app.domain.StreamingPolicySettings
 import com.phoebe.app.domain.Track
+import com.phoebe.app.domain.isLocalMediaPlayback
 import com.phoebe.app.platform.PhoebeLog
 import com.phoebe.app.platform.currentTimeMs
 import kotlin.math.pow
@@ -75,6 +76,8 @@ abstract class SimpleAudioPlayer(
     private var preparedPlayGeneration = -1
     private val triedPlaybackUris = linkedSetOf<String>()
     private var stickyPlaybackOrigin: String? = null
+    /** Set once the "playing only downloaded songs" notice was shown for the current queue. */
+    private var offlineSkipNoticeShown = false
     private var crossfadeDurationMs = 0L
     private var crossfadeRequestKey: String? = null
     private var manualSeekCrossfadeSuppression: ManualSeekCrossfadeSuppression? = null
@@ -119,10 +122,11 @@ abstract class SimpleAudioPlayer(
     override fun play(queue: List<Track>, startIndex: Int) {
         if (queue.isEmpty()) return
         val previous = mutableState.value
-        val playbackQueue = queue.preferStickyPlaybackOrigin()
+        val playbackQueue = queue.withDownloadedLocalUris().preferStickyPlaybackOrigin()
         val index = startIndex.coerceIn(playbackQueue.indices)
         val track = playbackQueue.getOrNull(index)
         val sameQueue = tracksMatch(previous.queue, playbackQueue)
+        if (!sameQueue) offlineSkipNoticeShown = false
 
         val sameCurrentTrack = sameQueue && track != null &&
             previous.currentIndex == index &&
@@ -599,7 +603,7 @@ abstract class SimpleAudioPlayer(
 
     override fun addToUpNext(track: Track) {
         val state = mutableState.value
-        val preferred = listOf(track).preferStickyPlaybackOrigin().first()
+        val preferred = listOf(track).withDownloadedLocalUris().preferStickyPlaybackOrigin().first()
         val deduped = state.queue.filterNot { it.id == preferred.id }
         val insertAt = (state.currentIndex + 1).coerceIn(0, deduped.size)
         val newQueue = deduped.toMutableList().also { it.add(insertAt, preferred) }
@@ -614,7 +618,9 @@ abstract class SimpleAudioPlayer(
         if (tracks.isEmpty()) return
         val state = mutableState.value
         val existingIds = state.queue.map { it.id }.toMutableSet()
-        val additions = tracks.filter { existingIds.add(it.id) }.preferStickyPlaybackOrigin()
+        val additions = tracks.filter { existingIds.add(it.id) }
+            .withDownloadedLocalUris()
+            .preferStickyPlaybackOrigin()
         if (additions.isEmpty()) return
         val nextQueue = state.queue + additions
         mutableState.value = state.copy(queue = nextQueue)
@@ -809,10 +815,11 @@ abstract class SimpleAudioPlayer(
 
     /** Adopt queue state without touching platform output (Android Auto / MediaSession playlist). */
     protected fun adoptQueueState(queue: List<Track>, startIndex: Int, isPlaying: Boolean) {
-        val index = if (queue.isEmpty()) -1 else startIndex.coerceIn(queue.indices)
-        val track = queue.getOrNull(index)
+        val adoptedQueue = queue.withDownloadedLocalUris()
+        val index = if (adoptedQueue.isEmpty()) -1 else startIndex.coerceIn(adoptedQueue.indices)
+        val track = adoptedQueue.getOrNull(index)
         mutableState.value = mutableState.value.copy(
-            queue = queue,
+            queue = adoptedQueue,
             currentIndex = if (track == null) -1 else index,
             isPlaying = isPlaying && track != null,
             isBuffering = false,
@@ -1007,11 +1014,36 @@ abstract class SimpleAudioPlayer(
         failure: PlaybackFailure,
         generation: Int = playGeneration,
     ) {
+        if (skipToDownloadedTrackAfterFailure(failure, generation)) return
         markPlaybackFailed(
             generation = generation,
             message = failure.userMessage(mutableState.value.currentTrack?.title),
             cancelPlayIntent = failure.holdsQueue,
         )
+    }
+
+    /**
+     * Offline, a streamed song can't reach the server, but downloaded songs further down the
+     * queue would still play. Unreachable failures normally hold the queue so a down server
+     * doesn't walk through every song (see [PlaybackFailure.holdsQueue]); jumping straight to a
+     * downloaded song never touches the server, so it can't do that.
+     */
+    private fun skipToDownloadedTrackAfterFailure(failure: PlaybackFailure, generation: Int): Boolean {
+        if (failure.kind != PlaybackFailureKind.Unreachable) return false
+        if (!isPlayRequestCurrent(generation)) return false
+        val state = mutableState.value
+        val failedTrack = state.currentTrack ?: return false
+        if (failedTrack.isLocalMediaPlayback()) return false
+        val target = nextDownloadedQueueIndex(state.queue, state.currentIndex, state.repeat) ?: return false
+        PhoebeLog.d("AudioPlayer") {
+            "server unreachable for track=${failedTrack.id}; skipping to downloaded track=${state.queue[target].id}"
+        }
+        if (!offlineSkipNoticeShown) {
+            offlineSkipNoticeShown = true
+            surfacePlaybackNotice(generation, "Can't reach the music server. Playing only downloaded songs.")
+        }
+        play(state.queue, target)
+        return true
     }
 
     protected fun markPlaybackFailed(

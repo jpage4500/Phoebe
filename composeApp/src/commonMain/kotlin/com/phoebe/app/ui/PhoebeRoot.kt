@@ -230,13 +230,14 @@ import com.phoebe.app.feature.search.LocalServerSearch
 import com.phoebe.app.feature.search.ServerSearchActions
 import com.phoebe.app.feature.search.SavedSearchActions
 import com.phoebe.app.feature.search.rememberSearchHistoryState
+import com.phoebe.app.feature.settings.DownloadManagerServices
+import com.phoebe.app.feature.settings.LocalDownloadManagerServices
 import com.phoebe.app.feature.settings.DownloadManagerUiSummary
 import com.phoebe.app.feature.settings.SettingsCategory
 import com.phoebe.app.domain.ShellPlaybackState
 import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogArtistForAlbum
 import com.phoebe.app.data.catalogTracksForArtist
-import com.phoebe.app.data.BackupRestoreMode
 import com.phoebe.app.data.PlayHistoryRankedEntries
 import com.phoebe.app.data.PlayHistorySnapshot
 import com.phoebe.app.data.RecentPersonalMixWindowMultiplier
@@ -416,6 +417,7 @@ private fun PhoebeRootStateHolder(
     val librariesLoading by state.librariesLoading.collectAsState()
     val librariesLoadError by state.librariesLoadError.collectAsState()
     val message by state.message.collectAsState()
+    val userDataFileActions = rememberUserDataFileActions(state)
     val pendingDuplicatePlaylistAdd by state.pendingDuplicatePlaylistAdd.collectAsState()
     val playbackSnackbar by state.playbackSnackbar.collectAsState()
     val songRadioUndo by state.songRadioUndo.collectAsState()
@@ -1420,6 +1422,17 @@ private fun PhoebeRootStateHolder(
         )
     }
 
+    val downloadManagerServices = remember(state) {
+        DownloadManagerServices(
+            lookupTracks = state::cachedTracksByIds,
+            backfillSizes = state::backfillDownloadSizes,
+            moveState = state.downloadMove,
+            onMoveConfirm = state::moveDownloadsToCurrentFolder,
+            onMoveStop = state::stopDownloadMove,
+            onMoveDismiss = state::dismissDownloadMove,
+        )
+    }
+
     CompositionLocalProvider(
         LocalCatalogHasContent provides catalogHasContent,
         LocalCatalogSyncState provides catalogSyncState,
@@ -1430,6 +1443,7 @@ private fun PhoebeRootStateHolder(
         LocalTracksLoading provides tracksLoading,
         LocalDownloadStatus provides downloadStatus,
         LocalDownloadActions provides downloadActions,
+        LocalDownloadManagerServices provides downloadManagerServices,
         LocalNowPlaying provides nowPlaying,
         LocalPlayHistory provides playHistory,
         LocalNowMs provides nowMs,
@@ -2129,13 +2143,13 @@ private fun PhoebeRootStateHolder(
                         onPersonalMix = state::setPersonalMixPreferences,
                         onAlbumGridItemSize = state::setAlbumGridItemSize,
                         onArtistGridItemSize = state::setArtistGridItemSize,
-                        onExportFavoritePlaylists = state::exportFavoritePlaylists,
-                        onImportFavoritePlaylists = state::importFavoritePlaylists,
-                        onExportRadioStations = state::exportRadioStations,
-                        onImportRadioStations = state::importRadioStations,
-                        onExportBackupPackage = state::exportBackupPackage,
-                        onImportBackupPackage = { state.importBackupPackage() },
-                        onReplaceFromBackupPackage = { state.importBackupPackage(BackupRestoreMode.Replace) },
+                        onExportFavoritePlaylists = userDataFileActions.exportFavoritePlaylists,
+                        onImportFavoritePlaylists = userDataFileActions.importFavoritePlaylists,
+                        onExportRadioStations = userDataFileActions.exportRadioStations,
+                        onImportRadioStations = userDataFileActions.importRadioStations,
+                        onExportBackupPackage = userDataFileActions.exportBackup,
+                        onImportBackupPackage = userDataFileActions.mergeBackup,
+                        onReplaceFromBackupPackage = userDataFileActions.replaceFromBackup,
                         appSettings = appSettings,
                         audioProcessingCapabilities = state.audioProcessingCapabilities,
                         homeScreenLayoutMode = homeScreenLayoutMode,
@@ -2718,13 +2732,13 @@ private fun PhoebeRootStateHolder(
                         onPersonalMix = state::setPersonalMixPreferences,
                         onAlbumGridItemSize = state::setAlbumGridItemSize,
                         onArtistGridItemSize = state::setArtistGridItemSize,
-                        onExportFavoritePlaylists = state::exportFavoritePlaylists,
-                        onImportFavoritePlaylists = state::importFavoritePlaylists,
-                        onExportRadioStations = state::exportRadioStations,
-                        onImportRadioStations = state::importRadioStations,
-                        onExportBackupPackage = state::exportBackupPackage,
-                        onImportBackupPackage = { state.importBackupPackage() },
-                        onReplaceFromBackupPackage = { state.importBackupPackage(BackupRestoreMode.Replace) },
+                        onExportFavoritePlaylists = userDataFileActions.exportFavoritePlaylists,
+                        onImportFavoritePlaylists = userDataFileActions.importFavoritePlaylists,
+                        onExportRadioStations = userDataFileActions.exportRadioStations,
+                        onImportRadioStations = userDataFileActions.importRadioStations,
+                        onExportBackupPackage = userDataFileActions.exportBackup,
+                        onImportBackupPackage = userDataFileActions.mergeBackup,
+                        onReplaceFromBackupPackage = userDataFileActions.replaceFromBackup,
                         onCrossfadeSeconds = state::setCrossfadeSeconds,
                         onScanLibraryOnLaunch = state::setScanLibraryOnLaunch,
                         onNotifyWhenDownloadFinishes = state::setNotifyWhenDownloadFinishes,
@@ -3440,7 +3454,8 @@ private fun List<DownloadItem>.toDownloadManagerUiSummary(activeDownloadJobCount
         ),
         complete = count { it.state == DownloadState.Complete },
         failed = count { it.state == DownloadState.Failed },
-        estimatedBytes = filter { it.state == DownloadState.Complete }.sumOf { it.downloadedBytes },
+        estimatedBytes = filter { it.state == DownloadState.Complete }
+            .sumOf { item -> item.downloadedBytes.takeIf { it > 0L } ?: item.totalBytes?.takeIf { it > 0L } ?: 0L },
     )
 
 private enum class MiniPlayerDragMode { Undecided, Expand, Dismiss }

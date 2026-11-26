@@ -275,6 +275,19 @@ actual class PlatformStorage actual constructor() {
 
     actual fun defaultDownloadDirectoryLabel(): String =
         defaultDownloadDirectory().absolutePath
+
+    actual suspend fun uriSize(uri: String): Long? = withContext(Dispatchers.IO) {
+        runCatching { Paths.get(URI(uri)).toFile() }.getOrNull()?.takeIf { it.isFile }?.length()
+    }
+
+    actual suspend fun isInDownloadDirectory(uri: String): Boolean = withContext(Dispatchers.IO) {
+        val root = (
+            readDownloadDirectory()?.let { runCatching { Paths.get(URI(it)).toFile() }.getOrNull() }
+                ?: defaultDownloadDirectory()
+            ).canonicalOrNull() ?: return@withContext false
+        val file = runCatching { Paths.get(URI(uri)).toFile() }.getOrNull()?.canonicalOrNull() ?: return@withContext false
+        file.toPath().startsWith(root.toPath())
+    }
 }
 
 actual class DownloadNotifier actual constructor() {
@@ -297,10 +310,13 @@ actual class DownloadNotifier actual constructor() {
 }
 
 @Composable
-actual fun rememberPickDownloadDirectory(onPicked: (String?) -> Unit): () -> Unit =
+actual fun rememberPickDownloadDirectory(initialDirectory: String?, onPicked: (String?) -> Unit): () -> Unit =
     rememberPickDesktopDirectory(
         title = "Choose downloads folder",
-        initialDirectory = defaultDownloadDirectory(),
+        initialDirectory = initialDirectory
+            ?.let { runCatching { Paths.get(URI(it)).toFile() }.getOrNull() }
+            ?.takeIf { it.isDirectory }
+            ?: defaultDownloadDirectory(),
         onPicked = onPicked,
     )
 

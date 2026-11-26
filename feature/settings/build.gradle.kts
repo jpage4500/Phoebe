@@ -10,6 +10,7 @@ kotlin {
                 implementation(project(":data:remote-control"))
                 implementation(project(":data:updates"))
                 implementation(project(":feature:playback"))
+                implementation(project(":ui:media"))
             }
         }
     }

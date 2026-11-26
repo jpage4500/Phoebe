@@ -640,18 +640,21 @@ internal fun MobileBrowseShell(
                         enabled = false,
                     )
                 }
-                DropdownMenuItem(
-                    text = {
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            PhoebeIconView(PhoebeIcon.Download, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
-                            Text("Downloads")
-                        }
-                    },
-                    onClick = {
-                        onNavigate(BrowseSection.Downloads)
-                        menuExpanded = false
-                    },
-                )
+                // Already on Downloads: don't offer a link back to the same page.
+                if (section != BrowseSection.Downloads) {
+                    DropdownMenuItem(
+                        text = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                PhoebeIconView(PhoebeIcon.Download, tint = PhoebeUi.secondaryText, modifier = Modifier.size(18.dp))
+                                Text("Downloads")
+                            }
+                        },
+                        onClick = {
+                            onNavigate(BrowseSection.Downloads)
+                            menuExpanded = false
+                        },
+                    )
+                }
                 DropdownMenuItem(
                     text = {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {

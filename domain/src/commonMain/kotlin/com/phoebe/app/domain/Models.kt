@@ -1395,6 +1395,17 @@ data class DownloadPolicySettings(
     }
 }
 
+/** Moving already-downloaded songs into a newly chosen download folder. */
+sealed interface DownloadMoveState {
+    /** The folder changed and [count] downloaded songs are still in the old one. */
+    data class Prompt(val count: Int) : DownloadMoveState
+
+    data class Moving(val done: Int, val total: Int, val failed: Int) : DownloadMoveState
+
+    /** Finished, or stopped early when [stopped]; songs not moved stay where they were. */
+    data class Finished(val moved: Int, val failed: Int, val stopped: Boolean) : DownloadMoveState
+}
+
 @Serializable
 enum class DownloadQuality {
     Original,

@@ -278,12 +278,24 @@ upsertPlaylist:
 INSERT OR REPLACE INTO PlaylistRow(id, title, trackCount, plKey, thumbUrl, sortKey, rating, favorite)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
+-- Server metadata never carries a downloaded file's path, so a refresh that writes a track
+-- with no localUri keeps the one already stored. Clearing it takes clearTrackLocalUri.
+-- (INSERT OR REPLACE + subquery rather than ON CONFLICT DO UPDATE: Android 8 ships SQLite 3.18.)
 upsertTrack:
 INSERT OR REPLACE INTO TrackRow(
     id, title, artist, album, durationMs, streamUrl, downloadUrl,
     thumbUrl, localArtworkUri, localUri, year, genre, mood, style, filepath, audioCodec, bitrateKbps, dateAddedMs, rating, parentAlbumId,
     replayGainTrackGainDb, replayGainTrackPeak, replayGainAlbumGainDb, replayGainAlbumPeak
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+) VALUES (
+    :id, :title, :artist, :album, :durationMs, :streamUrl, :downloadUrl,
+    :thumbUrl, :localArtworkUri,
+    coalesce(nullif(:localUri, ''), (SELECT existing.localUri FROM TrackRow existing WHERE existing.id = :id)),
+    :year, :genre, :mood, :style, :filepath, :audioCodec, :bitrateKbps, :dateAddedMs, :rating, :parentAlbumId,
+    :replayGainTrackGainDb, :replayGainTrackPeak, :replayGainAlbumGainDb, :replayGainAlbumPeak
+);
+
+clearTrackLocalUri:
+UPDATE TrackRow SET localUri = NULL, localArtworkUri = NULL WHERE id = ?;
 
 upsertTrackParent:
 INSERT OR REPLACE INTO TrackParentRow(parentId, trackId, position, playlistItemId) VALUES (?, ?, ?, ?);

@@ -16,9 +16,11 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -39,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
@@ -66,6 +69,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -212,7 +221,7 @@ internal fun SettingsMobileScreen(
             modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 12.dp),
+                .padding(horizontal = if (shownPage == SettingsCategory.Downloads) 12.dp else 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             if (shownPage == null) {
@@ -1529,196 +1538,128 @@ private fun DownloadsSettingsCard(
     onNotifyWhenDownloadFinishes: (Boolean) -> Unit,
     compact: Boolean = false,
 ) {
-    val pickDownloadDirectory = rememberPickDownloadDirectory(onPicked = onDownloadDirectory)
-    val display = downloadDirectory?.let(::displayDownloadDirectory) ?: defaultDownloadDirectoryLabel
+    val pickDownloadDirectory = rememberPickDownloadDirectory(initialDirectory = downloadDirectory, onPicked = onDownloadDirectory)
+    val display = shortDownloadLocation(downloadDirectory ?: defaultDownloadDirectoryLabel)
     var confirmDeleteAll by remember { mutableStateOf(false) }
-    var selectedTab by remember { mutableStateOf(DownloadManagerTab.Active) }
+    var openSheet by remember { mutableStateOf<DownloadSheetKind?>(null) }
     val policy = appSettings.downloadPolicy.normalized()
-    val filteredItems = remember(downloadItems, selectedTab) {
-        downloadItems
-            .filter { item -> selectedTab.includes(item) }
-            .sortedWith(compareBy<DownloadItem> { it.state.sortOrder }.thenByDescending { it.updatedAtMs }.thenBy { it.title })
-    }
-    SettingsCard {
-        if (!compact) SettingsCardHeader(title = "Downloads", subtitle = "Offline songs")
-        Text("Download Location", color = PhoebeUi.secondaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(top = 6.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(PhoebeUi.subtleFill)
-                .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
-                .clickable(onClick = pickDownloadDirectory)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 0.dp),
-        ) {
+    // Sections sit straight on the page (no outer card) so each card can use the full width.
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        if (!compact) {
+            Column { SettingsCardHeader(title = "Downloads", subtitle = "Offline songs") }
+        }
+        DownloadsSectionCard(Modifier.padding(16.dp), verticalSpacing = 12.dp) {
+            DownloadStorageSummary(downloadManager)
             Row(
-                Modifier.fillMaxWidth(),
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 44.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(PhoebeUi.subtleFill)
+                    .clickable(role = Role.Button, onClick = pickDownloadDirectory)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                PhoebeIconView(PhoebeIcon.Download, tint = PhoebeUi.accentLight, modifier = Modifier.size(15.dp))
-                if (!compact) {
-                    Text(
-                        display,
-                        color = PhoebeUi.primaryText,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                } else {
-                    Spacer(Modifier.weight(1f))
-                }
-                Text("Change", color = PhoebeUi.accentLight, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            }
-            if (compact) {
+                PhoebeIconView(PhoebeIcon.Download, tint = PhoebeUi.secondaryText, modifier = Modifier.size(16.dp))
                 Text(
-                    display,
-                    color = PhoebeUi.primaryText,
-                    fontSize = 12.sp,
-                    maxLines = Int.MAX_VALUE,
-                    overflow = TextOverflow.Clip,
-                    modifier = Modifier.fillMaxWidth().padding(start = 25.dp),
-                )
-            }
-        }
-        if (downloadDirectory != null) {
-            Spacer(Modifier.height(8.dp))
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { onDownloadDirectory(null) }
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                PhoebeIconView(PhoebeIcon.Close, tint = PhoebeUi.mutedText, modifier = Modifier.size(12.dp))
-                Text("Use default location", color = PhoebeUi.secondaryText, fontSize = 12.sp)
-            }
-        }
-        Spacer(Modifier.height(14.dp))
-        Text("Download manager", color = PhoebeUi.secondaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        FlowRow(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            DownloadMetricChip("Active", downloadManager.active)
-            DownloadMetricChip("Complete", downloadManager.complete)
-            DownloadMetricChip("Failed", downloadManager.failed)
-            DownloadMetricChip("All", downloadManager.total)
-        }
-        if (downloadManager.estimatedBytes > 0L) {
-            Text(
-                "Estimated storage ${formatBytes(downloadManager.estimatedBytes)}",
-                color = PhoebeUi.secondaryText,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(top = 10.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(PhoebeUi.subtleFill)
-                .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    if (downloadManager.total == 1) "1 tracked download" else "${downloadManager.total} tracked downloads",
-                    color = PhoebeUi.primaryText,
+                    buildAnnotatedString {
+                        append("Saving to ")
+                        withStyle(SpanStyle(color = PhoebeUi.primaryText)) { append(display) }
+                    },
+                    color = PhoebeUi.secondaryText,
                     fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
-                Text("Retry failures, clear finished files, or reset download status", color = PhoebeUi.secondaryText, fontSize = 12.sp)
+                Text("Change", color = PhoebeUi.accentLight, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
-            Text(
-                "Delete all",
-                color = if (downloadCount > 0) PhoebeUi.accentLight else PhoebeUi.mutedText,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable(enabled = downloadCount > 0) { confirmDeleteAll = true }
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+            if (downloadDirectory != null) {
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(role = Role.Button) { onDownloadDirectory(null) }
+                        .padding(horizontal = 4.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    PhoebeIconView(PhoebeIcon.Close, tint = PhoebeUi.mutedText, modifier = Modifier.size(12.dp))
+                    Text("Use default location", color = PhoebeUi.secondaryText, fontSize = 12.sp)
+                }
+            }
+        }
+        DownloadsSection("Status") {
+            DownloadStatusRows(
+                summary = downloadManager,
+                onOpen = { openSheet = it },
+                onRetryFailed = onRetryFailedDownloads,
             )
         }
-        FlowRow(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            DownloadManagerAction(
-                label = "Retry failed",
-                enabled = downloadManager.failed > 0,
-                onClick = onRetryFailedDownloads,
-            )
-            DownloadManagerAction(
-                label = "Clear failed",
-                enabled = downloadManager.failed > 0,
-                onClick = onClearFailedDownloads,
-            )
-            DownloadManagerAction(
-                label = "Delete complete",
-                enabled = downloadManager.complete > 0,
-                onClick = onDeleteCompletedDownloads,
-            )
+        DownloadsSection("Rules") {
+            DownloadsSectionCard {
+                DownloadStepperRow(
+                    label = "Concurrent downloads",
+                    value = policy.maxConcurrentDownloads,
+                    range = DownloadPolicySettings.MinConcurrentDownloads..DownloadPolicySettings.MaxConcurrentDownloads,
+                    onValue = { value -> onDownloadPolicySettings(policy.copy(maxConcurrentDownloads = value)) },
+                )
+                DownloadsDivider()
+                Box(Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) {
+                    SettingsSwitchRow(
+                        title = "Retry failed downloads",
+                        subtitle = "Requeue failed downloads automatically",
+                        checked = policy.autoRetryFailedDownloads,
+                        onCheckedChange = { checked -> onDownloadPolicySettings(policy.copy(autoRetryFailedDownloads = checked)) },
+                    )
+                }
+                DownloadsDivider()
+                Box(Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) {
+                    SettingsSwitchRow(
+                        title = "Wi-Fi only",
+                        subtitle = "Don't start downloads on metered networks",
+                        checked = policy.wifiOnly,
+                        onCheckedChange = { checked -> onDownloadPolicySettings(policy.withWifiOnly(checked)) },
+                    )
+                }
+                DownloadsDivider()
+                Box(Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) {
+                    SettingsSwitchRow(
+                        title = "Notify when finished",
+                        subtitle = "Alert when a batch of downloads completes",
+                        checked = appSettings.notifyWhenDownloadFinishes,
+                        onCheckedChange = onNotifyWhenDownloadFinishes,
+                    )
+                }
+            }
         }
-        Spacer(Modifier.height(14.dp))
-        DownloadManagerTabs(
-            selected = selectedTab,
-            summary = downloadManager,
-            onSelected = { selectedTab = it },
+    }
+    val services = LocalDownloadManagerServices.current
+    LaunchedEffect(services) { services.backfillSizes() }
+    val moveState by services.moveState.collectAsState()
+    moveState?.let { state ->
+        DownloadMoveDialog(
+            state = state,
+            folderName = display,
+            onMove = services.onMoveConfirm,
+            onStop = services.onMoveStop,
+            onDismiss = services.onMoveDismiss,
         )
-        Spacer(Modifier.height(8.dp))
-        DownloadManagerList(
-            items = filteredItems,
-            selectedTab = selectedTab,
-            compact = compact,
-            onRetry = { item -> onRetryDownloads(setOf(item.trackId)) },
-            onCancel = { item -> onCancelDownloads(setOf(item.trackId)) },
-            onDelete = { item -> onDeleteDownloads(setOf(item.trackId)) },
-        )
-        Spacer(Modifier.height(14.dp))
-        Text("Download policy", color = PhoebeUi.secondaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        MixValueSlider(
-            label = "Concurrent downloads",
-            value = policy.maxConcurrentDownloads,
-            range = DownloadPolicySettings.MinConcurrentDownloads..DownloadPolicySettings.MaxConcurrentDownloads,
-            suffix = "",
-            compact = compact,
-        ) { value ->
-            onDownloadPolicySettings(policy.copy(maxConcurrentDownloads = value))
-        }
-        SettingsSwitchRow(
-            title = "Retry failed downloads",
-            subtitle = "Requeue failed downloads automatically",
-            checked = policy.autoRetryFailedDownloads,
-            onCheckedChange = { checked -> onDownloadPolicySettings(policy.copy(autoRetryFailedDownloads = checked)) },
-        )
-        SettingsSwitchRow(
-            title = "Wi-Fi only",
-            subtitle = "Don't start downloads on metered networks",
-            checked = policy.wifiOnly,
-            onCheckedChange = { checked -> onDownloadPolicySettings(policy.withWifiOnly(checked)) },
-        )
-        SettingsSwitchRow(
-            title = "Notify when finished",
-            subtitle = "Alert when a batch of downloads completes",
-            checked = appSettings.notifyWhenDownloadFinishes,
-            onCheckedChange = onNotifyWhenDownloadFinishes,
-        )
-        Text(
-            "Quality: Original",
-            color = PhoebeUi.secondaryText,
-            fontSize = 12.sp,
-            modifier = Modifier.padding(top = 4.dp),
+    }
+    openSheet?.let { kind ->
+        DownloadManagerSheet(
+            kind = kind,
+            downloadItems = downloadItems,
+            onDismiss = { openSheet = null },
+            onRetryDownloads = onRetryDownloads,
+            onRetryAllFailed = onRetryFailedDownloads,
+            onClearAllFailed = onClearFailedDownloads,
+            onCancelDownloads = onCancelDownloads,
+            onDeleteDownloads = onDeleteDownloads,
+            onDeleteAll = {
+                openSheet = null
+                confirmDeleteAll = true
+            },
         )
     }
     if (confirmDeleteAll) {
@@ -1733,253 +1674,289 @@ private fun DownloadsSettingsCard(
     }
 }
 
+/** Label on the left, a compact − value + stepper on the right. */
 @Composable
-private fun DownloadMetricChip(
+private fun DownloadStepperRow(
     label: String,
     value: Int,
+    range: IntRange,
+    onValue: (Int) -> Unit,
 ) {
     Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(PhoebeUi.subtleFill)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(8.dp))
-            .padding(horizontal = 10.dp, vertical = 7.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .padding(start = 14.dp, end = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = PhoebeUi.secondaryText, fontSize = 12.sp)
-        Text(value.toString(), color = PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(PhoebeUi.subtleFill),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            DownloadStepperButton(text = "−", description = "Fewer $label", enabled = value > range.first) { onValue(value - 1) }
+            Text(
+                value.toString(),
+                color = PhoebeUi.primaryText,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.width(24.dp),
+            )
+            DownloadStepperButton(text = "+", description = "More $label", enabled = value < range.last) { onValue(value + 1) }
+        }
     }
 }
 
 @Composable
-private fun DownloadManagerAction(
-    label: String,
-    enabled: Boolean,
-    onClick: () -> Unit,
+private fun DownloadStepperButton(text: String, description: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(40.dp)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = if (enabled) PhoebeUi.primaryText else PhoebeUi.mutedText, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/**
+ * Short, human folder name for the download location: decodes SAF tree URIs ("primary:Music/Phoebe" becomes
+ * "Music/Phoebe"), calls the app-private folder "App storage", and otherwise keeps the last two path segments.
+ */
+internal fun shortDownloadLocation(location: String): String {
+    val decoded = percentDecode(location.removePrefix("file:").removePrefix("//"))
+    if ("/Android/data/" in decoded) return "App storage"
+    val afterTree = decoded.substringAfterLast("tree/", decoded).substringAfterLast("document/")
+    // SAF ids look like "primary:Music/Phoebe" or "1234-ABCD:Music"; keep the path after the volume.
+    val volumePath = afterTree.substringAfter(':', afterTree).takeIf { ':' in afterTree && '/' !in afterTree.substringBefore(':') }
+        ?: afterTree
+    val segments = volumePath.split('/', '\\').filter { it.isNotBlank() }
+    return when {
+        segments.isEmpty() -> if (volumePath.isBlank()) "Storage root" else volumePath
+        else -> segments.takeLast(2).joinToString("/")
+    }
+}
+
+private fun percentDecode(value: String): String {
+    if ('%' !in value) return value
+    val bytes = ArrayList<Byte>(value.length)
+    var i = 0
+    while (i < value.length) {
+        val c = value[i]
+        if (c == '%' && i + 2 <= value.lastIndex) {
+            val byte = value.substring(i + 1, i + 3).toIntOrNull(16)
+            if (byte != null) {
+                bytes += byte.toByte()
+                i += 3
+                continue
+            }
+        }
+        c.toString().encodeToByteArray().forEach { bytes += it }
+        i++
+    }
+    return bytes.toByteArray().decodeToString()
+}
+
+/** A titled group on the Downloads page: an uppercase label over its content. */
+@Composable
+private fun DownloadsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.padding(horizontal = 4.dp)) { SectionLabel(title, PhoebeUi.secondaryText, fontSize = 12.sp) }
+        content()
+    }
+}
+
+/** Full-width rounded card used for each Downloads section. */
+@Composable
+private fun DownloadsSectionCard(
+    contentModifier: Modifier = Modifier,
+    verticalSpacing: Dp = 0.dp,
+    content: @Composable ColumnScope.() -> Unit,
 ) {
-    Text(
-        label,
-        color = if (enabled) PhoebeUi.accentLight else PhoebeUi.mutedText,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+    val shape = RoundedCornerShape(PhoebeUi.shapes.panelRadius)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(PhoebeUi.panel)
+            .border(BorderStroke(1.dp, PhoebeUi.border), shape)
+            .then(contentModifier),
+        verticalArrangement = Arrangement.spacedBy(verticalSpacing),
+        content = content,
     )
 }
 
-private enum class DownloadManagerTab(val label: String) {
-    Active("Active"),
-    Complete("Complete"),
-    Failed("Failed"),
-    All("All"),
-    ;
+@Composable
+private fun DownloadsDivider() {
+    Box(Modifier.fillMaxWidth().height(1.dp).background(PhoebeUi.border))
+}
 
-    fun includes(item: DownloadItem): Boolean = when (this) {
-        Active -> item.state == DownloadState.Queued || item.state == DownloadState.Downloading
-        Complete -> item.state == DownloadState.Complete
-        Failed -> item.state == DownloadState.Failed
-        All -> true
+@Composable
+private fun DownloadStorageSummary(summary: DownloadManagerUiSummary) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+            Text(
+                summary.complete.toString(),
+                color = PhoebeUi.primaryText,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                if (summary.complete == 1) " song offline" else " songs offline",
+                color = PhoebeUi.secondaryText,
+                fontSize = 13.sp,
+                modifier = Modifier.weight(1f).padding(bottom = 4.dp),
+            )
+            if (summary.estimatedBytes > 0L) {
+                Text(
+                    formatBytes(summary.estimatedBytes),
+                    color = PhoebeUi.secondaryText,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
+        }
+        val barTotal = summary.complete + summary.failed + summary.active
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(PhoebeUi.progressTrack),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            if (barTotal > 0) {
+                if (summary.complete > 0) Box(Modifier.weight(summary.complete.toFloat()).fillMaxHeight().background(PhoebeUi.accentLight))
+                if (summary.active > 0) Box(Modifier.weight(summary.active.toFloat()).fillMaxHeight().background(PhoebeUi.secondaryText))
+                if (summary.failed > 0) Box(Modifier.weight(summary.failed.toFloat()).fillMaxHeight().background(DownloadFailedTint))
+            }
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            DownloadLegend(PhoebeUi.accentLight, "${summary.complete} downloaded")
+            if (summary.active > 0) DownloadLegend(PhoebeUi.secondaryText, "${summary.active} in progress")
+            if (summary.failed > 0) DownloadLegend(DownloadFailedTint, "${summary.failed} failed")
+        }
     }
 }
 
-private val DownloadState.sortOrder: Int
-    get() = when (this) {
-        DownloadState.Downloading -> 0
-        DownloadState.Queued -> 1
-        DownloadState.Failed -> 2
-        DownloadState.Complete -> 3
+@Composable
+private fun DownloadLegend(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(8.dp).clip(RoundedCornerShape(2.dp)).background(color))
+        Text(label, color = PhoebeUi.secondaryText, fontSize = 12.sp)
     }
+}
 
 @Composable
-private fun DownloadManagerTabs(
-    selected: DownloadManagerTab,
+private fun DownloadStatusRows(
     summary: DownloadManagerUiSummary,
-    onSelected: (DownloadManagerTab) -> Unit,
+    onOpen: (DownloadSheetKind) -> Unit,
+    onRetryFailed: () -> Unit,
+) {
+    DownloadsSectionCard {
+        DownloadStatusRow(
+            icon = PhoebeIcon.Download,
+            iconTint = if (summary.active > 0) PhoebeUi.accentLight else PhoebeUi.mutedText,
+            title = DownloadSheetKind.Active.title,
+            subtitle = if (summary.active > 0) "${summary.active} in progress" else "Queue is empty",
+            subtitleColor = PhoebeUi.secondaryText,
+            count = summary.active,
+            onClick = { onOpen(DownloadSheetKind.Active) },
+        )
+        DownloadsDivider()
+        DownloadStatusRow(
+            icon = PhoebeIcon.Check,
+            iconTint = PhoebeUi.accentLight,
+            title = DownloadSheetKind.Downloaded.title,
+            subtitle = if (summary.complete > 0) "Browse, search and delete" else "No downloaded songs yet",
+            subtitleColor = PhoebeUi.secondaryText,
+            count = summary.complete,
+            onClick = { onOpen(DownloadSheetKind.Downloaded) },
+        )
+        DownloadsDivider()
+        DownloadStatusRow(
+            icon = PhoebeIcon.Close,
+            iconTint = if (summary.failed > 0) DownloadFailedTint else PhoebeUi.mutedText,
+            title = DownloadSheetKind.Failed.title,
+            subtitle = when (summary.failed) {
+                0 -> "No failures"
+                1 -> "1 song needs attention"
+                else -> "${summary.failed} songs need attention"
+            },
+            subtitleColor = if (summary.failed > 0) DownloadFailedTint else PhoebeUi.secondaryText,
+            count = summary.failed,
+            onClick = { onOpen(DownloadSheetKind.Failed) },
+            action = if (summary.failed > 0) {
+                {
+                    Text(
+                        "Retry all",
+                        color = PhoebeUi.accentLight,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .border(BorderStroke(1.dp, PhoebeUi.accentLight.copy(alpha = 0.6f)), RoundedCornerShape(999.dp))
+                            .clickable(role = Role.Button, onClick = onRetryFailed)
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                    )
+                }
+            } else {
+                null
+            },
+        )
+    }
+}
+
+@Composable
+private fun DownloadStatusRow(
+    icon: PhoebeIcon,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    subtitleColor: Color,
+    count: Int,
+    onClick: () -> Unit,
+    action: (@Composable () -> Unit)? = null,
 ) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(PhoebeUi.subtleFill)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+            .clickable(role = Role.Button, onClick = onClick)
+            .heightIn(min = 60.dp)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        DownloadManagerTab.entries.forEach { tab ->
-            val isSelected = tab == selected
-            val count = when (tab) {
-                DownloadManagerTab.Active -> summary.active
-                DownloadManagerTab.Complete -> summary.complete
-                DownloadManagerTab.Failed -> summary.failed
-                DownloadManagerTab.All -> summary.total
-            }
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(36.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { onSelected(tab) }
-                    .background(if (isSelected) PhoebeUi.accent.copy(alpha = 0.16f) else Color.Transparent)
-                    .border(
-                        BorderStroke(1.dp, if (isSelected) PhoebeUi.accent.copy(alpha = 0.32f) else Color.Transparent),
-                        RoundedCornerShape(8.dp),
-                    ),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "${tab.label} $count",
-                    color = if (isSelected) PhoebeUi.accentLight else PhoebeUi.secondaryText,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun DownloadManagerList(
-    items: List<DownloadItem>,
-    selectedTab: DownloadManagerTab,
-    compact: Boolean,
-    onRetry: (DownloadItem) -> Unit,
-    onCancel: (DownloadItem) -> Unit,
-    onDelete: (DownloadItem) -> Unit,
-) {
-    if (items.isEmpty()) {
-        Text(
-            "No ${selectedTab.label.lowercase()} downloads",
-            color = PhoebeUi.mutedText,
-            fontSize = 12.sp,
-            modifier = Modifier
-                .fillMaxWidth()
+        Box(
+            Modifier
+                .size(36.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(PhoebeUi.subtleFill)
-                .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp))
-                .padding(horizontal = 12.dp, vertical = 12.dp),
-        )
-        return
-    }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(PhoebeUi.subtleFill)
-            .border(BorderStroke(1.dp, PhoebeUi.border), RoundedCornerShape(10.dp)),
-    ) {
-        items.take(if (compact) 6 else 10).forEachIndexed { index, item ->
-            DownloadManagerRow(
-                item = item,
-                onRetry = onRetry,
-                onCancel = onCancel,
-                onDelete = onDelete,
-            )
-            if (index != items.lastIndex && index != (if (compact) 5 else 9)) {
-                Box(Modifier.fillMaxWidth().height(1.dp).background(PhoebeUi.border.copy(alpha = 0.55f)))
-            }
-        }
-        if (items.size > if (compact) 6 else 10) {
-            Text(
-                "${items.size - if (compact) 6 else 10} more downloads in this tab",
-                color = PhoebeUi.mutedText,
-                fontSize = 11.sp,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun DownloadManagerRow(
-    item: DownloadItem,
-    onRetry: (DownloadItem) -> Unit,
-    onCancel: (DownloadItem) -> Unit,
-    onDelete: (DownloadItem) -> Unit,
-) {
-    val stateTint = downloadStateTint(item.state)
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .background(iconTint.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
         ) {
-            PhoebeIconView(PhoebeIcon.Download, tint = stateTint, modifier = Modifier.size(15.dp))
-            Column(Modifier.weight(1f)) {
-                Text(item.title, color = PhoebeUi.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(item.artist, color = PhoebeUi.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Text(item.state.label, color = stateTint, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            PhoebeIconView(icon, tint = iconTint, modifier = Modifier.size(18.dp))
         }
-        if (item.state == DownloadState.Downloading || item.state == DownloadState.Queued) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(PhoebeUi.progressTrack),
-            ) {
-                Box(
-                    Modifier
-                        .fillMaxWidth(item.progress.coerceIn(0f, 1f))
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(PhoebeUi.accentLight),
-                )
-            }
+        Column(Modifier.weight(1f)) {
+            Text(title, color = PhoebeUi.primaryText, fontSize = 15.sp, lineHeight = 19.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = subtitleColor, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        item.error?.takeIf { it.isNotBlank() }?.let { error ->
-            Text(error, color = PhoebeUi.mutedText, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (item.state == DownloadState.Failed) {
-                DownloadManagerAction("Retry", enabled = item.downloadUrl.isNotBlank(), onClick = { onRetry(item) })
-            }
-            if (item.state == DownloadState.Queued || item.state == DownloadState.Downloading) {
-                DownloadManagerAction("Cancel", enabled = true, onClick = { onCancel(item) })
-            }
-            DownloadManagerAction(
-                label = if (item.state == DownloadState.Complete) "Delete file" else "Remove",
-                enabled = true,
-                onClick = { onDelete(item) },
+        if (action != null) {
+            action()
+        } else {
+            Text(
+                count.toString(),
+                color = if (count > 0) PhoebeUi.primaryText else PhoebeUi.mutedText,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
             )
-            item.totalBytes?.takeIf { it > 0L }?.let { total ->
-                Text(
-                    "${formatBytes(item.downloadedBytes)} / ${formatBytes(total)}",
-                    color = PhoebeUi.mutedText,
-                    fontSize = 11.sp,
-                )
-            }
         }
+        PhoebeIconView(PhoebeIcon.ChevronRight, tint = PhoebeUi.secondaryText, modifier = Modifier.size(16.dp))
     }
 }
-
-private val DownloadState.label: String
-    get() = when (this) {
-        DownloadState.Queued -> "Queued"
-        DownloadState.Downloading -> "Downloading"
-        DownloadState.Complete -> "Complete"
-        DownloadState.Failed -> "Failed"
-    }
-
-@Composable
-private fun downloadStateTint(state: DownloadState): Color =
-    when (state) {
-        DownloadState.Queued -> PhoebeUi.secondaryText
-        DownloadState.Downloading -> PhoebeUi.accentLight
-        DownloadState.Complete -> PhoebeUi.primaryText
-        DownloadState.Failed -> PhoebeUi.mutedText
-    }
 
 @Composable
 private fun DeleteDownloadsDialog(
@@ -2023,14 +2000,7 @@ private fun DeleteDownloadsDialog(
     }
 }
 
-private fun displayDownloadDirectory(uri: String): String =
-    uri.removePrefix("file:")
-        .removePrefix("//")
-        .replace("%20", " ")
-        .substringAfterLast("tree/", uri)
-        .ifBlank { uri }
-
-private fun formatBytes(bytes: Long): String {
+internal fun formatBytes(bytes: Long): String {
     val mib = 1024L * 1024L
     val gib = mib * 1024L
     return when {
