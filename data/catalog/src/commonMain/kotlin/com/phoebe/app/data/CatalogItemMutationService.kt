@@ -8,20 +8,15 @@ import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
 import com.phoebe.app.domain.providerLabel
 import com.phoebe.app.domain.supportsRemoteRatings
-import com.phoebe.app.platform.PlatformStorage
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
-
-private const val FavoritePlaylistsExportPath = "exports/favorite-playlists.json"
-private const val RadioStationsExportPath = "exports/radio-stations.json"
 
 @SingleIn(AppScope::class)
 @Inject
 class CatalogItemMutationService(
     private val catalogRepository: CatalogRepository,
     private val radioRepository: RadioRepository,
-    private val platformStorage: PlatformStorage,
 ) {
     suspend fun updateTrackMetadata(session: PlexSession?, update: TrackMetadataUpdate): String {
         val result = catalogRepository.updateTrackMetadata(session, update)
@@ -55,27 +50,22 @@ class CatalogItemMutationService(
     suspend fun toggleFavoritePlaylist(session: PlexSession?, playlist: Playlist): String =
         favoriteMessage("Playlist", session, catalogRepository.toggleFavoritePlaylist(session, playlist))
 
-    suspend fun exportFavoritePlaylists(): String {
+    /** The favorite playlists as an export file, or null when there are none to export. */
+    suspend fun favoritePlaylistsExport(): TextExport? {
         val export = catalogRepository.favoritePlaylistsExport()
-        if (export.playlists.isEmpty()) return "No favorite playlists to export."
-        return runCatching {
-            platformStorage.writeText(
-                FavoritePlaylistsExportPath,
-                PlexClient.PlexJson.encodeToString(FavoritePlaylistsExport.serializer(), export),
-            )
-        }.fold(
-            onSuccess = { "Exported ${export.playlists.size} favorite playlists." },
-            onFailure = { it.message ?: "Couldn't export favorite playlists." },
+        if (export.playlists.isEmpty()) return null
+        return TextExport(
+            text = PlexClient.PlexJson.encodeToString(FavoritePlaylistsExport.serializer(), export),
+            itemCount = export.playlists.size,
         )
     }
 
-    suspend fun importFavoritePlaylists(): String {
-        val content = platformStorage.readText(FavoritePlaylistsExportPath)
-        if (content.isNullOrBlank()) return "No favorite playlist export found."
-        return runCatching {
-            val export = PlexClient.PlexJson.decodeFromString(FavoritePlaylistsExport.serializer(), content)
-            catalogRepository.importFavoritePlaylists(export)
-        }.fold(
+    suspend fun importFavoritePlaylists(content: String): String {
+        if (content.isBlank()) return "That file is empty."
+        val export = runCatching {
+            PlexClient.PlexJson.decodeFromString(FavoritePlaylistsExport.serializer(), content)
+        }.getOrElse { return "That file isn't a favorite playlists export." }
+        return runCatching { catalogRepository.importFavoritePlaylists(export) }.fold(
             onSuccess = { imported ->
                 if (imported > 0) {
                     "Imported $imported favorite playlists."
@@ -87,27 +77,22 @@ class CatalogItemMutationService(
         )
     }
 
-    suspend fun exportRadioStations(): String {
+    /** The manually added radio stations as an export file, or null when there are none to export. */
+    suspend fun radioStationsExport(): TextExport? {
         val export = radioRepository.exportRadioStations()
-        if (export.stations.isEmpty()) return "No manual radio stations to export."
-        return runCatching {
-            platformStorage.writeText(
-                RadioStationsExportPath,
-                PlexClient.PlexJson.encodeToString(RadioStationsExport.serializer(), export),
-            )
-        }.fold(
-            onSuccess = { "Exported ${export.stations.size} radio stations." },
-            onFailure = { it.message ?: "Couldn't export radio stations." },
+        if (export.stations.isEmpty()) return null
+        return TextExport(
+            text = PlexClient.PlexJson.encodeToString(RadioStationsExport.serializer(), export),
+            itemCount = export.stations.size,
         )
     }
 
-    suspend fun importRadioStations(): String {
-        val content = platformStorage.readText(RadioStationsExportPath)
-        if (content.isNullOrBlank()) return "No radio stations export found."
-        return runCatching {
-            val export = PlexClient.PlexJson.decodeFromString(RadioStationsExport.serializer(), content)
-            radioRepository.importRadioStations(export)
-        }.fold(
+    suspend fun importRadioStations(content: String): String {
+        if (content.isBlank()) return "That file is empty."
+        val export = runCatching {
+            PlexClient.PlexJson.decodeFromString(RadioStationsExport.serializer(), content)
+        }.getOrElse { return "That file isn't a radio stations export." }
+        return runCatching { radioRepository.importRadioStations(export) }.fold(
             onSuccess = { imported ->
                 if (imported > 0) {
                     "Imported $imported radio stations."
@@ -145,3 +130,9 @@ class CatalogItemMutationService(
             else -> "Rating saved locally."
         }
 }
+
+/** An export ready to hand to a save dialog, with how many items it holds for the confirmation message. */
+data class TextExport(
+    val text: String,
+    val itemCount: Int,
+)
