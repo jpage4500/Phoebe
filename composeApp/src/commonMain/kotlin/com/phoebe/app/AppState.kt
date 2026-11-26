@@ -78,6 +78,7 @@ import com.phoebe.app.data.catalogTracksForArtist
 import com.phoebe.app.data.ArtworkOriginHolder
 import com.phoebe.app.data.isLocalOnlyServerOrigin
 import com.phoebe.app.data.BackupRestoreMode
+import com.phoebe.app.data.TextExport
 import com.phoebe.app.data.JellyfinQuickConnectResult
 import com.phoebe.app.data.JellyfinPlayHistorySyncResult
 import com.phoebe.app.data.ListenBrainzFeedbackScore
@@ -101,16 +102,18 @@ import com.phoebe.app.domain.RecentSearchItem
 import com.phoebe.app.platform.MemoryPressureLevel
 import com.phoebe.app.platform.PhoebeAppLifecycle
 import com.phoebe.app.platform.PhoebeLog
-import com.phoebe.app.platform.shouldDeferCatalogMemoryUpdates
+import com.phoebe.app.platform.TextFileOpenResult
+import com.phoebe.app.platform.TextFileSaveResult
 import com.phoebe.app.platform.currentNetworkIdentity
 import com.phoebe.app.platform.currentNetworkMeteringStatus
 import com.phoebe.app.platform.currentTimeMs
 import com.phoebe.app.platform.defaultDownloadWifiOnly
+import com.phoebe.app.platform.discoverJellyfinServers as discoverJellyfinServersOnNetwork
 import com.phoebe.app.platform.isDebugBuild
 import com.phoebe.app.platform.isDesktopPlatform
-import com.phoebe.app.platform.discoverJellyfinServers as discoverJellyfinServersOnNetwork
 import com.phoebe.app.platform.openExternalUrl
 import com.phoebe.app.platform.requestNotificationPermission
+import com.phoebe.app.platform.shouldDeferCatalogMemoryUpdates
 import com.phoebe.app.ui.AppNavigationRequest
 import com.phoebe.app.ui.CollectionMixSeed
 import com.phoebe.app.updates.AppUpdateState
@@ -4612,42 +4615,74 @@ class AppState(
         mutableMessage.value = dependencies.catalogItemMutationService.toggleFavoritePlaylist(session.value, playlist)
     }
 
-    fun exportFavoritePlaylists() = scope.launch {
-        mutableMessage.value = dependencies.catalogItemMutationService.exportFavoritePlaylists()
-    }
-
-    fun importFavoritePlaylists() = scope.launch {
-        mutableMessage.value = dependencies.catalogItemMutationService.importFavoritePlaylists()
-    }
-
-    fun exportRadioStations() = scope.launch {
-        mutableMessage.value = dependencies.catalogItemMutationService.exportRadioStations()
-    }
-
-    fun importRadioStations() = scope.launch {
-        mutableMessage.value = dependencies.catalogItemMutationService.importRadioStations()
-    }
-
-    fun exportBackupPackage() = scope.launch {
-        val payload = dependencies.importExportService.exportBackupPackage()
-        runCatching {
-            dependencies.platformStorage.writeText("exports/phoebe-backup.json", payload)
-        }.fold(
-            onSuccess = { mutableMessage.value = "Exported Phoebe backup package." },
-            onFailure = { error -> mutableMessage.value = error.message ?: "Couldn't export Phoebe backup." },
-        )
-    }
-
-    fun importBackupPackage(mode: BackupRestoreMode = BackupRestoreMode.Merge) = scope.launch {
-        val payload = dependencies.platformStorage.readText("exports/phoebe-backup.json")
-        if (payload.isNullOrBlank()) {
-            mutableMessage.value = "No Phoebe backup export found."
-            return@launch
+    /** Builds the export for [file], or shows why there's nothing to export and returns null. */
+    suspend fun prepareUserDataExport(file: UserDataFile): TextExport? {
+        val export = runCatching {
+            when (file) {
+                UserDataFile.Backup -> TextExport(dependencies.importExportService.exportBackupPackage(), itemCount = 1)
+                UserDataFile.FavoritePlaylists -> dependencies.catalogItemMutationService.favoritePlaylistsExport()
+                UserDataFile.RadioStations -> dependencies.catalogItemMutationService.radioStationsExport()
+            }
+        }.getOrElse { error ->
+            surfaceTransientNotice(error.message ?: "Couldn't export ${file.label}.")
+            return null
         }
-        val preview = dependencies.importExportService.restoreBackupPackage(payload, mode)
-        dependencies.catalogRepository.refreshSmartPlaylists()
-        mutableMessage.value = "Restored ${preview.smartPlaylistCount} smart playlists, " +
-            "${preview.savedSearchCount} saved searches, and ${preview.metadataOverrideCount} metadata overrides."
+        if (export == null) {
+            surfaceTransientNotice(
+                when (file) {
+                    UserDataFile.Backup -> "Couldn't export ${file.label}."
+                    UserDataFile.FavoritePlaylists -> "No favorite playlists to export."
+                    UserDataFile.RadioStations -> "No manually added radio stations to export."
+                },
+            )
+        }
+        return export
+    }
+
+    fun onUserDataExportSaved(file: UserDataFile, export: TextExport, result: TextFileSaveResult) {
+        when (result) {
+            TextFileSaveResult.Cancelled -> Unit
+            TextFileSaveResult.Saved -> surfaceTransientNotice(
+                when (file) {
+                    UserDataFile.Backup -> "Saved Phoebe backup."
+                    UserDataFile.FavoritePlaylists -> "Saved ${export.itemCount} favorite playlists."
+                    UserDataFile.RadioStations -> "Saved ${export.itemCount} radio stations."
+                },
+            )
+            is TextFileSaveResult.Failed -> surfaceTransientNotice(
+                "Couldn't save ${file.label}" + (result.message?.let { ": $it" } ?: "."),
+            )
+        }
+    }
+
+    fun importUserDataFile(
+        file: UserDataFile,
+        result: TextFileOpenResult,
+        mode: BackupRestoreMode = BackupRestoreMode.Merge,
+    ) = scope.launch {
+        val content = when (result) {
+            TextFileOpenResult.Cancelled -> return@launch
+            is TextFileOpenResult.Failed -> {
+                surfaceTransientNotice("Couldn't read that file" + (result.message?.let { ": $it" } ?: "."))
+                return@launch
+            }
+            is TextFileOpenResult.Opened -> result.text
+        }
+        val notice = when (file) {
+            UserDataFile.FavoritePlaylists -> dependencies.catalogItemMutationService.importFavoritePlaylists(content)
+            UserDataFile.RadioStations -> dependencies.catalogItemMutationService.importRadioStations(content)
+            UserDataFile.Backup -> {
+                val preview = dependencies.importExportService.restoreBackupPackage(content, mode)
+                if (preview == null) {
+                    "That file isn't a Phoebe backup."
+                } else {
+                    dependencies.catalogRepository.refreshSmartPlaylists()
+                    "Restored ${preview.smartPlaylistCount} smart playlists, " +
+                        "${preview.savedSearchCount} saved searches, and ${preview.metadataOverrideCount} metadata overrides."
+                }
+            }
+        }
+        surfaceTransientNotice(notice)
     }
 
     fun addLocalFolderFromUri(rootUri: String?) = scope.launch {

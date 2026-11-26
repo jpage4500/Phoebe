@@ -238,7 +238,6 @@ import com.phoebe.app.domain.ShellPlaybackState
 import com.phoebe.app.data.catalogAlbumsForArtist
 import com.phoebe.app.data.catalogArtistForAlbum
 import com.phoebe.app.data.catalogTracksForArtist
-import com.phoebe.app.data.BackupRestoreMode
 import com.phoebe.app.data.PlayHistoryRankedEntries
 import com.phoebe.app.data.PlayHistorySnapshot
 import com.phoebe.app.data.RecentPersonalMixWindowMultiplier
@@ -418,6 +417,7 @@ private fun PhoebeRootStateHolder(
     val librariesLoading by state.librariesLoading.collectAsState()
     val librariesLoadError by state.librariesLoadError.collectAsState()
     val message by state.message.collectAsState()
+    val userDataFileActions = rememberUserDataFileActions(state)
     val pendingDuplicatePlaylistAdd by state.pendingDuplicatePlaylistAdd.collectAsState()
     val playbackSnackbar by state.playbackSnackbar.collectAsState()
     val songRadioUndo by state.songRadioUndo.collectAsState()
@@ -2143,13 +2143,13 @@ private fun PhoebeRootStateHolder(
                         onPersonalMix = state::setPersonalMixPreferences,
                         onAlbumGridItemSize = state::setAlbumGridItemSize,
                         onArtistGridItemSize = state::setArtistGridItemSize,
-                        onExportFavoritePlaylists = state::exportFavoritePlaylists,
-                        onImportFavoritePlaylists = state::importFavoritePlaylists,
-                        onExportRadioStations = state::exportRadioStations,
-                        onImportRadioStations = state::importRadioStations,
-                        onExportBackupPackage = state::exportBackupPackage,
-                        onImportBackupPackage = { state.importBackupPackage() },
-                        onReplaceFromBackupPackage = { state.importBackupPackage(BackupRestoreMode.Replace) },
+                        onExportFavoritePlaylists = userDataFileActions.exportFavoritePlaylists,
+                        onImportFavoritePlaylists = userDataFileActions.importFavoritePlaylists,
+                        onExportRadioStations = userDataFileActions.exportRadioStations,
+                        onImportRadioStations = userDataFileActions.importRadioStations,
+                        onExportBackupPackage = userDataFileActions.exportBackup,
+                        onImportBackupPackage = userDataFileActions.mergeBackup,
+                        onReplaceFromBackupPackage = userDataFileActions.replaceFromBackup,
                         appSettings = appSettings,
                         audioProcessingCapabilities = state.audioProcessingCapabilities,
                         homeScreenLayoutMode = homeScreenLayoutMode,
@@ -2732,13 +2732,13 @@ private fun PhoebeRootStateHolder(
                         onPersonalMix = state::setPersonalMixPreferences,
                         onAlbumGridItemSize = state::setAlbumGridItemSize,
                         onArtistGridItemSize = state::setArtistGridItemSize,
-                        onExportFavoritePlaylists = state::exportFavoritePlaylists,
-                        onImportFavoritePlaylists = state::importFavoritePlaylists,
-                        onExportRadioStations = state::exportRadioStations,
-                        onImportRadioStations = state::importRadioStations,
-                        onExportBackupPackage = state::exportBackupPackage,
-                        onImportBackupPackage = { state.importBackupPackage() },
-                        onReplaceFromBackupPackage = { state.importBackupPackage(BackupRestoreMode.Replace) },
+                        onExportFavoritePlaylists = userDataFileActions.exportFavoritePlaylists,
+                        onImportFavoritePlaylists = userDataFileActions.importFavoritePlaylists,
+                        onExportRadioStations = userDataFileActions.exportRadioStations,
+                        onImportRadioStations = userDataFileActions.importRadioStations,
+                        onExportBackupPackage = userDataFileActions.exportBackup,
+                        onImportBackupPackage = userDataFileActions.mergeBackup,
+                        onReplaceFromBackupPackage = userDataFileActions.replaceFromBackup,
                         onCrossfadeSeconds = state::setCrossfadeSeconds,
                         onScanLibraryOnLaunch = state::setScanLibraryOnLaunch,
                         onNotifyWhenDownloadFinishes = state::setNotifyWhenDownloadFinishes,
