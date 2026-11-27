@@ -518,13 +518,17 @@ internal fun UpNextRow(
                     }
                 }
             }
-            Text(
-                track.artist,
-                color = PhoebeUi.secondaryText,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (track.isExternal) ExternalTrackBadge()
+                Text(
+                    track.artist,
+                    color = PhoebeUi.secondaryText,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+            }
         }
         Text(
             formatDuration(track.durationMs),
