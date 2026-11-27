@@ -18,14 +18,18 @@ class NavidromePlayHistorySyncer(
     private val playHistoryRepository: PlayHistoryRepository,
     private val catalogRepository: CatalogRepository,
 ) {
-    suspend fun sync(session: PlexSession?, catalog: CatalogSnapshot): NavidromePlayHistorySyncResult {
+    suspend fun sync(
+        session: PlexSession?,
+        catalog: CatalogSnapshot,
+        onProgress: suspend (loadedAlbums: Int, totalAlbums: Int) -> Unit = { _, _ -> },
+    ): NavidromePlayHistorySyncResult {
         if (session?.isNavidrome() != true) return NavidromePlayHistorySyncResult.Skipped
         val server = session.selectedServer ?: return NavidromePlayHistorySyncResult.Skipped
         val username = session.userName
         val password = session.token.takeIf { it.isNotBlank() } ?: return NavidromePlayHistorySyncResult.Skipped
 
         val stats = runCatching {
-            subsonicClient.playHistoryStats(server, username, password)
+            subsonicClient.playHistoryStats(server, username, password, onProgress = onProgress)
         }.getOrElse { error ->
             PhoebeLog.d("NavidromePlayHistorySyncer") { "play history fetch failed: ${error.message}" }
             return NavidromePlayHistorySyncResult.Skipped

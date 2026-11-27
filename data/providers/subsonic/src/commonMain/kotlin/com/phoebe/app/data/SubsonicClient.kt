@@ -232,19 +232,33 @@ class SubsonicClient(
         username: String,
         password: String,
         maxAlbumsPerList: Int = SubsonicPlayHistoryAlbumListSize,
+        parallelism: Int = 8,
+        onProgress: suspend (loaded: Int, total: Int) -> Unit = { _, _ -> },
     ): List<SubsonicSongPlayStat> {
         val albums = (
             albumListByType(server, username, password, "frequent", maxAlbumsPerList) +
                 albumListByType(server, username, password, "recent", maxAlbumsPerList)
             ).distinctBy { it.id }
         if (albums.isEmpty()) return emptyList()
-        val statsBySongId = LinkedHashMap<String, SubsonicSongPlayStat>()
-        for (album in albums) {
-            val id = album.id.removePrefix("navidrome:")
-            val response = request<SubsonicAlbumRoot>(server.uri, username, password, "getAlbum") {
-                parameter("id", id)
+        // Fetched in parallel chunks: one at a time this was ~1.5s per album through Octo (~90s for 60).
+        // Chunk results keep album order, so the merge below is unchanged.
+        val songsByAlbum = ArrayList<Pair<Album, List<SubsonicSongDto>>>(albums.size)
+        onProgress(0, albums.size)
+        coroutineScope {
+            albums.chunked(parallelism.coerceAtLeast(1)).forEach { chunk ->
+                chunk.map { album ->
+                    async {
+                        val response = request<SubsonicAlbumRoot>(server.uri, username, password, "getAlbum") {
+                            parameter("id", album.id.removePrefix("navidrome:"))
+                        }
+                        album to response.response.album?.song.orEmpty()
+                    }
+                }.awaitAll().let(songsByAlbum::addAll)
+                onProgress(songsByAlbum.size, albums.size)
             }
-            val songs = response.response.album?.song.orEmpty()
+        }
+        val statsBySongId = LinkedHashMap<String, SubsonicSongPlayStat>()
+        for ((album, songs) in songsByAlbum) {
             for (song in songs) {
                 val playCount = song.playCount?.toLong()?.coerceAtLeast(0L) ?: 0L
                 val lastPlayedMs = song.played?.parseSubsonicTimestampMillis()

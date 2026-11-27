@@ -57,6 +57,7 @@ class CatalogSyncService(
         session: PlexSession?,
         catalog: CatalogSnapshot,
         recentOnly: Boolean,
+        reportProgress: Boolean = false,
     ): Any? {
         if (session.isPlex()) {
             if (!recentOnly) {
@@ -73,7 +74,14 @@ class CatalogSyncService(
             }
         }
         if (session.isNavidrome()) {
-            return navidromePlayHistorySyncer.sync(session, catalog)
+            if (!reportProgress) return navidromePlayHistorySyncer.sync(session, catalog)
+            return try {
+                navidromePlayHistorySyncer.sync(session, catalog) { loaded, total ->
+                    catalogRepository.reportPlayHistorySyncProgress(loaded, total)
+                }
+            } finally {
+                catalogRepository.finishPlayHistorySyncProgress()
+            }
         }
         if (session.isEmbyFamily()) {
             return jellyfinPlayHistorySyncer.sync(session, catalog)

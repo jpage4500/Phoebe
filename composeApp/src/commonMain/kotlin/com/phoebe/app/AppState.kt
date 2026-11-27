@@ -1804,6 +1804,7 @@ class AppState(
                     showMessage = false,
                     recentOnly = backgroundIfCached,
                     warmAfterSync = !backgroundIfCached,
+                    reportProgress = !backgroundIfCached,
                 )
             } else {
                 syncRemotePlayHistoryInBackground()
@@ -2019,6 +2020,7 @@ class AppState(
         showMessage: Boolean,
         recentOnly: Boolean,
         warmAfterSync: Boolean = true,
+        reportProgress: Boolean = false,
     ): Any? {
         return runCatching {
             val currentSession = session.value
@@ -2030,6 +2032,7 @@ class AppState(
                 session = currentSession,
                 catalog = catalog.value,
                 recentOnly = recentOnly,
+                reportProgress = reportProgress,
             )
             if (warmAfterSync && currentSession.isPlex() && recentOnly) {
                 launchKnownPlexPlayCountRefresh(currentSession)

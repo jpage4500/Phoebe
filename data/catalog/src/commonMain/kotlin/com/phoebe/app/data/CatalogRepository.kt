@@ -137,6 +137,7 @@ import kotlinx.serialization.Serializable
 import kotlin.concurrent.Volatile
 import kotlin.random.Random
 
+private const val PlayHistorySyncMessage = "Syncing play history…"
 private const val DownloadChunkSize = 64 * 1024
 private const val DownloadProgressByteInterval = 2 * 1024 * 1024L
 private const val DownloadProgressStep = 0.05f
@@ -624,6 +625,36 @@ class CatalogRepository(
     }
 
     /** Clears in-flight sync UI when a refresh job is cancelled (e.g. sign-out or superseded refresh). */
+    /** Shows the play-history step of a manual refresh, which runs after the catalog itself is done. */
+    fun reportPlayHistorySyncProgress(loadedAlbums: Int, totalAlbums: Int) {
+        publishCatalogSyncState(
+            CatalogSyncState(
+                phase = CatalogSyncPhase.LoadingSongs,
+                message = PlayHistorySyncMessage,
+                detail = "$loadedAlbums of $totalAlbums albums",
+                loadedAlbums = mutableCatalog.value.albums.size,
+                loadedTracks = mutableCatalog.value.tracksByParent.values.sumOf { it.size },
+                progress = loadedAlbums.toFloat() / totalAlbums.coerceAtLeast(1),
+                blocking = false,
+            ),
+            force = loadedAlbums == 0 || loadedAlbums >= totalAlbums,
+        )
+    }
+
+    fun finishPlayHistorySyncProgress() {
+        if (mutableCatalogSyncState.value.message != PlayHistorySyncMessage) return
+        publishCatalogSyncState(
+            CatalogSyncState(
+                phase = CatalogSyncPhase.Complete,
+                message = "Library refreshed.",
+                loadedAlbums = mutableCatalog.value.albums.size,
+                loadedTracks = mutableCatalog.value.tracksByParent.values.sumOf { it.size },
+                progress = 1f,
+            ),
+            force = true,
+        )
+    }
+
     fun clearActiveSyncProgress() {
         if (mutableCatalogSyncState.value.isActive) {
             publishCatalogSyncState(CatalogSyncState(), force = true)
