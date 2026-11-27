@@ -3385,7 +3385,16 @@ class CatalogRepository(
                 val adapter = providerRegistry.adapterFor(session)
                 if (adapter != null && !session.isEmbyFamily()) {
                     val existingTracks = mutableCatalog.value.tracksByParent[playlist.id].orEmpty()
-                    val tracks = adapter.playlistTracks(session, playlist.copy(id = playlist.id.removePrefix("$providerPrefix:")))
+                    val fetched = try {
+                        adapter.playlistTracks(session, playlist.copy(id = playlist.id.removePrefix("$providerPrefix:")))
+                    } catch (gone: RemotePlaylistNotFoundException) {
+                        // Expired server playlist (e.g. an Octo radio station): drop the dead row so it
+                        // stops showing as an empty playlist until the next full catalog refresh.
+                        PhoebeLog.d("CatalogRepository") { "playlist '${playlist.title}' is gone on the server: ${gone.message}" }
+                        deletePlaylistLocally(playlist.id)
+                        throw RemotePlaylistNotFoundException("“${playlist.title}” is no longer on the server.")
+                    }
+                    val tracks = fetched
                         .map { it.withProviderPrefix(providerPrefix) }
                         .let { preserveTrackDateAdded(existingTracks, it) }
                         .let { preservePrependedPlaylistAdditions(playlist.id, it) }
@@ -5177,6 +5186,7 @@ class CatalogRepository(
             if (existing.size != playlistMeta.trackCount) {
                 runCatching { refetchPlaylistTracksFromPlex(session, playlistMeta, showRefreshing = false) }
                     .onFailure { error ->
+                        if (error is RemotePlaylistNotFoundException) throw error
                         PhoebeLog.d("CatalogRepository") {
                             "playlist refresh failed for '${playlistMeta.title}': ${error.message}"
                         }
@@ -5193,6 +5203,7 @@ class CatalogRepository(
                 if (cached.size != playlistMeta.trackCount) {
                     runCatching { refetchPlaylistTracksFromPlex(session, playlistMeta, showRefreshing = false) }
                         .onFailure { error ->
+                            if (error is RemotePlaylistNotFoundException) throw error
                             PhoebeLog.d("CatalogRepository") {
                                 "playlist database refresh failed for '${playlistMeta.title}': ${error.message}"
                             }

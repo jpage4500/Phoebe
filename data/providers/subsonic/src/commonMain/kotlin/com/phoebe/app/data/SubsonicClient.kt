@@ -667,7 +667,13 @@ class SubsonicClient(
             block()
         }.body<T>().also { root ->
             val carrier = root as? SubsonicStatusCarrier
-            if (carrier?.statusForCheck == "failed") error(subsonicFailureMessage(method, carrier.errorForCheck))
+            if (carrier?.statusForCheck == "failed") {
+                val failure = carrier.errorForCheck
+                val message = subsonicFailureMessage(method, failure)
+                // Code 70 is "data not found"; only getPlaylist is translated so callers can drop the dead row.
+                if (failure?.code == SubsonicNotFoundCode && method == "getPlaylist") throw RemotePlaylistNotFoundException(message)
+                error(message)
+            }
         }
     }
 
@@ -720,6 +726,9 @@ private interface SubsonicStatusCarrier {
     val statusForCheck: String?
     val errorForCheck: SubsonicErrorDto?
 }
+
+/** Subsonic "The requested data was not found." */
+private const val SubsonicNotFoundCode = 70
 
 /** Subsonic API error codes: http://www.subsonic.org/pages/api.jsp (error codes table). */
 private fun subsonicFailureMessage(method: String, error: SubsonicErrorDto?): String = when (error?.code) {

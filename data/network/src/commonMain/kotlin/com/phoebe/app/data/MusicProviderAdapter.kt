@@ -13,6 +13,12 @@ import com.phoebe.app.domain.Playlist
 import com.phoebe.app.domain.Track
 import com.phoebe.app.domain.TrackMetadataUpdate
 
+/**
+ * The server no longer has this playlist. Octo's generated "… Radio" stations expire (`validUntil`)
+ * and are replaced, so a playlist from the last catalog refresh can be gone by the time it's opened.
+ */
+class RemotePlaylistNotFoundException(message: String) : IllegalStateException(message)
+
 data class ProviderCapabilities(
     val passwordSignIn: Boolean = true,
     val quickConnect: Boolean = false,
