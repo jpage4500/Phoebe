@@ -771,8 +771,17 @@ private data class SubsonicSongRoot(@SerialName("subsonic-response") val respons
 @Serializable
 private data class SubsonicPlaylistsRoot(@SerialName("subsonic-response") val response: SubsonicResponse = SubsonicResponse())
 
+/**
+ * Carries status so a failed getPlaylist (e.g. code 70 for an expired Octo radio station) throws
+ * instead of decoding as an empty playlist.
+ */
 @Serializable
-private data class SubsonicPlaylistRoot(@SerialName("subsonic-response") val response: SubsonicResponse = SubsonicResponse())
+private data class SubsonicPlaylistRoot(
+    @SerialName("subsonic-response") val response: SubsonicResponse = SubsonicResponse(),
+) : SubsonicStatusCarrier {
+    override val statusForCheck: String? get() = response.status
+    override val errorForCheck: SubsonicErrorDto? get() = response.error
+}
 
 @Serializable
 private data class SubsonicSimilarSongsRoot(@SerialName("subsonic-response") val response: SubsonicResponse = SubsonicResponse())
