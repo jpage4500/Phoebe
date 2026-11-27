@@ -329,6 +329,7 @@ internal data class SettingsActions(
     val onLastFmSubmitScrobbles: (Boolean) -> Unit = {},
     val onEventSettings: (com.phoebe.app.domain.EventSettings) -> Unit = {},
     val onCheckForUpdates: () -> Unit = {},
+    val onLibrarySyncMode: (com.phoebe.app.domain.JellyfinSyncMode) -> Unit = {},
     val onInstallUpdate: () -> Unit = {},
     val onRemoteControlHostEnabled: (Boolean) -> Unit = {},
     val onRemoteControlHostName: (String) -> Unit = {},

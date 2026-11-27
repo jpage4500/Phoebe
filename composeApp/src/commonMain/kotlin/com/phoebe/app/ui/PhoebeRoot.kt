@@ -2199,6 +2199,7 @@ private fun PhoebeRootStateHolder(
                         onEventSettings = state::setEventSettings,
                         appUpdateState = appUpdateState,
                         onCheckForUpdates = state::checkForUpdates,
+                        onLibrarySyncMode = state::setLibrarySyncMode,
                         routeViewModelFactory = state.routeViewModelFactory,
                         onInstallUpdate = state::installAvailableUpdate,
                         onOpenEventsDebugMenu = if (isDebugBuild()) {
@@ -2778,6 +2779,7 @@ private fun PhoebeRootStateHolder(
                         onLastFmSubmitScrobbles = state::setLastFmSubmitScrobbles,
                         onEventSettings = state::setEventSettings,
                         onCheckForUpdates = state::checkForUpdates,
+                        onLibrarySyncMode = state::setLibrarySyncMode,
                         onInstallUpdate = state::installAvailableUpdate,
                         onRemoteControlHostEnabled = state::setRemoteControlHostEnabled,
                         onRemoteControlHostName = state::setRemoteControlHostName,

@@ -10,6 +10,7 @@ import com.phoebe.app.domain.DownloadItem
 import com.phoebe.app.domain.DownloadPolicySettings
 import com.phoebe.app.domain.EventSettings
 import com.phoebe.app.domain.HomeSection
+import com.phoebe.app.domain.JellyfinSyncMode
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.MobileBottomTab
 import com.phoebe.app.domain.NowPlayingVisualizerPreset
@@ -108,6 +109,8 @@ class SettingsRouteActions(
     val onLastFmSubmitScrobbles: (Boolean) -> Unit = {},
     val onEventSettings: (EventSettings) -> Unit = {},
     val onCheckForUpdates: () -> Unit = {},
+    /** Quick/Full catalog sync for Navidrome, Jellyfin and Emby. */
+    val onLibrarySyncMode: (JellyfinSyncMode) -> Unit = {},
     val onInstallUpdate: () -> Unit = {},
     val onRemoteControlHostEnabled: (Boolean) -> Unit = {},
     val onRemoteControlHostName: (String) -> Unit = {},

@@ -97,7 +97,9 @@ import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.MobileBottomTab
 import com.phoebe.app.domain.NowPlayingVisualizerPreset
 import com.phoebe.app.domain.PersonalMixPreferences
+import com.phoebe.app.domain.JellyfinSyncMode
 import com.phoebe.app.domain.PlexSession
+import com.phoebe.app.domain.supportsLibrarySyncMode
 import com.phoebe.app.domain.StreamingPolicySettings
 import com.phoebe.app.domain.StreamingQuality
 import com.phoebe.app.domain.providerLabel
@@ -244,7 +246,11 @@ private fun SettingsCategoryContent(
     val libraryUi = state.libraryUi
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         when (category) {
-            SettingsCategory.Account -> AccountSettingsCard(session = state.session, compact = compact)
+            SettingsCategory.Account -> AccountSettingsCard(
+                session = state.session,
+                onLibrarySyncMode = actions.onLibrarySyncMode,
+                compact = compact,
+            )
             SettingsCategory.Playback -> AudioPlaybackSettingsCard(
                 settings = appSettings,
                 capabilities = state.audioProcessingCapabilities,
@@ -2551,6 +2557,7 @@ private fun SettingsSwitchRow(
 @Composable
 private fun AccountSettingsCard(
     session: PlexSession?,
+    onLibrarySyncMode: (JellyfinSyncMode) -> Unit = {},
     compact: Boolean = false,
 ) {
     val signedIn = session?.token?.isNotBlank() == true
@@ -2613,6 +2620,13 @@ private fun AccountSettingsCard(
                 session.selectedLibrary?.title?.takeIf { it.isNotBlank() }?.let { libraryTitle ->
                     AccountDetailRow(label = "Library", value = libraryTitle)
                 }
+            }
+            if (session.supportsLibrarySyncMode()) {
+                LibrarySyncModeSection(
+                    selected = session.jellyfinSyncMode,
+                    onSelect = onLibrarySyncMode,
+                    modifier = Modifier.padding(top = if (compact) 14.dp else 18.dp),
+                )
             }
         }
     }
@@ -3023,6 +3037,60 @@ private fun listenBrainzStorageNote(availability: SecureCredentialAvailability):
         ListenBrainzCredentialStorageStatus.Unknown ->
             "Token storage status will be checked when you connect."
     }
+
+@Composable
+private fun LibrarySyncModeSection(
+    selected: JellyfinSyncMode,
+    onSelect: (JellyfinSyncMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Library sync", color = PhoebeUi.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        val outer = RoundedCornerShape(12.dp)
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(outer)
+                .background(PhoebeUi.elevatedFill)
+                .border(BorderStroke(1.dp, PhoebeUi.border), outer)
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            listOf(JellyfinSyncMode.Quick to "Quick sync", JellyfinSyncMode.Full to "Full sync").forEach { (mode, label) ->
+                val active = mode == selected
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(if (active) PhoebeUi.accent.copy(alpha = 0.24f) else Color.Transparent)
+                        .clickable(enabled = !active) { onSelect(mode) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        color = if (active) PhoebeUi.primaryText else PhoebeUi.mutedText,
+                        fontSize = 13.sp,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                }
+            }
+        }
+        Text(
+            when (selected) {
+                JellyfinSyncMode.Quick ->
+                    "Loads your library a page at a time, so browsing starts right away. Songs, search and " +
+                        "smart playlists cover what has been loaded so far."
+                JellyfinSyncMode.Full ->
+                    "Loads every album and song on each refresh, so songs, search and smart playlists cover " +
+                        "your whole library. Refreshes take longer on large libraries."
+            },
+            color = PhoebeUi.mutedText,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+        )
+    }
+}
 
 @Composable
 private fun AccountDetailRow(

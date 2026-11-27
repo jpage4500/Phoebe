@@ -272,6 +272,16 @@ class SessionRepository(
         }
     }
 
+    /** Changes Quick/Full sync for the signed-in server; the next catalog refresh uses it. */
+    suspend fun setSyncMode(mode: JellyfinSyncMode) {
+        PhoebeLog.d("SessionRepository") { "setSyncMode $mode" }
+        val generation = sessionGeneration
+        mutableSession.value?.let { session ->
+            if (session.jellyfinSyncMode == mode) return
+            save(session.copy(jellyfinSyncMode = mode), expectedGeneration = generation)
+        }
+    }
+
     suspend fun signOut() {
         PhoebeLog.d("SessionRepository") { "signOut" }
         sessionGeneration += 1

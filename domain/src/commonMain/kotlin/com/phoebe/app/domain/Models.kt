@@ -108,6 +108,9 @@ fun PlexSession?.isEmbyFamily(): Boolean = this?.providerType?.isEmbyFamily() ==
 
 fun PlexSession?.isNavidrome(): Boolean = this?.providerType == MediaProviderType.Navidrome
 
+/** Servers with a real Quick (paged) vs Full catalog sync; Plex and Music Assistant have one mode. */
+fun PlexSession?.supportsLibrarySyncMode(): Boolean = isNavidrome() || isEmbyFamily()
+
 fun PlexSession?.isMusicAssistant(): Boolean = this?.providerType == MediaProviderType.MusicAssistant
 
 fun PlexSession?.isPlex(): Boolean = this?.providerType == MediaProviderType.Plex

@@ -61,6 +61,7 @@ import com.phoebe.app.domain.isEmbyFamily
 import com.phoebe.app.domain.isFromLocalFolder
 import com.phoebe.app.domain.isMusicAssistant
 import com.phoebe.app.domain.isNavidrome
+import com.phoebe.app.domain.supportsLibrarySyncMode
 import com.phoebe.app.domain.isPlex
 import com.phoebe.app.domain.isPlexLibraryTrack
 import com.phoebe.app.domain.playlistEntryKey
@@ -1864,6 +1865,22 @@ class AppState(
         }
         requestNavigation(AppNavigationRequest.PlaylistDetail(playlist.id))
         syncLikedSongsInBackground()
+    }
+
+    /**
+     * Switches Quick/Full sync while signed in (Navidrome, Jellyfin, Emby). Full starts a full sync
+     * right away; Quick takes effect on the next refresh, which goes back to paged loading.
+     */
+    fun setLibrarySyncMode(mode: JellyfinSyncMode) = scope.launch {
+        val current = session.value ?: return@launch
+        if (!current.supportsLibrarySyncMode() || current.jellyfinSyncMode == mode) return@launch
+        dependencies.sessionRepository.setSyncMode(mode)
+        if (mode == JellyfinSyncMode.Full) {
+            cancelLightweightRemoteSync()
+            refreshCatalogSuspended(catalogMessage = "Full sync complete.")
+        } else {
+            mutableMessage.value = "Quick sync is on. The next refresh loads your library a page at a time."
+        }
     }
 
     fun refreshCatalog() = scope.launch {

@@ -1002,6 +1002,7 @@ internal fun DesktopPlayer(
                                             onLastFmSubmitScrobbles = settingsActions.onLastFmSubmitScrobbles,
                                             onEventSettings = settingsActions.onEventSettings,
                                             onCheckForUpdates = settingsActions.onCheckForUpdates,
+                                            onLibrarySyncMode = settingsActions.onLibrarySyncMode,
                                             onInstallUpdate = settingsActions.onInstallUpdate,
                                             onRemoteControlHostEnabled = settingsActions.onRemoteControlHostEnabled,
                                             onRemoteControlHostName = settingsActions.onRemoteControlHostName,
