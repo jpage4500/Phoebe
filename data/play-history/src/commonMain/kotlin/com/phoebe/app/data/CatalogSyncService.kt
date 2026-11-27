@@ -21,13 +21,43 @@ class CatalogSyncService(
     private val plexPlayHistorySyncer: PlexPlayHistorySyncer,
     private val jellyfinPlayHistorySyncer: JellyfinPlayHistorySyncer,
     private val navidromePlayHistorySyncer: NavidromePlayHistorySyncer,
+    private val libraryChangeDetector: LibraryChangeDetector,
 ) {
+    /**
+     * Rebuilds the catalog from the server. A background refresh over a cached catalog (the
+     * launch refresh) first asks the server whether its library changed since the last completed
+     * sync; if not, it runs only the lightweight sync (stars, playlists, first page) instead.
+     * A manual refresh always does the full work.
+     */
     suspend fun refreshAggregatedCatalog(
         session: PlexSession?,
         backgroundIfCached: Boolean,
     ) {
+        val signal = session?.takeIf { it.selectedServer != null && it.selectedLibrary != null }
+            ?.let { libraryChangeDetector.currentSignal(it) }
+        if (session != null && signal != null && backgroundIfCached &&
+            catalogRepository.canSkipUnchangedRemoteRefresh(session) &&
+            libraryChangeDetector.isUnchangedSinceLastSync(session, signal)
+        ) {
+            PhoebeLog.d("CatalogSyncService") {
+                "library unchanged since last sync (${signal.fingerprint}); running lightweight sync only"
+            }
+            catalogRepository.syncLightweightRemoteState(session)
+            ensureLikedSongsPlaylistIfPossible(session)
+            return
+        }
         catalogRepository.refreshAggregated(session, backgroundIfCached = backgroundIfCached)
+        // Saved after the refresh, with the signal read before it, so a change made mid-sync
+        // still shows up as a change next time.
+        if (session != null && signal != null) libraryChangeDetector.saveSyncedSignal(session, signal)
         ensureLikedSongsPlaylistIfPossible(session)
+    }
+
+    /** Makes the next sync download everything, e.g. when switching to Full sync. */
+    suspend fun forgetSavedSyncState(session: PlexSession?) {
+        if (session == null) return
+        libraryChangeDetector.forget(session)
+        catalogRepository.forgetAlbumFingerprints(session)
     }
 
     suspend fun warmPlaylistTracks(session: PlexSession?) {

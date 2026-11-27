@@ -35,5 +35,6 @@ suspend fun PhoebeDatabase.clearAllAppData(clearPlayHistory: Boolean = true) = w
         catalogQueries.clearAlbums()
         catalogQueries.clearPlaylists()
         catalogQueries.clearLocalFileMetadataCache()
+        remoteSyncStateQueries.clearAll()
     }
 }

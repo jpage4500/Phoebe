@@ -196,6 +196,17 @@ class PlexClient private constructor(
             .map { MusicLibrary(key = it.key, title = it.title) }
     }
 
+    /**
+     * A cheap "has the library changed?" signal: the section's content-changed, scanned and
+     * updated times from /library/sections. Null when the section isn't listed or reports none.
+     */
+    suspend fun librarySectionFingerprint(server: PlexServer, token: String, library: MusicLibrary): String? {
+        val response = plexGet<PlexMediaContainerResponse>(server, token, "/library/sections")
+        val section = response.mediaContainer.directories.firstOrNull { it.key == library.key } ?: return null
+        if (section.contentChangedAt == null && section.scannedAt == null && section.updatedAt == null) return null
+        return "content=${section.contentChangedAt ?: ""};scanned=${section.scannedAt ?: ""};updated=${section.updatedAt ?: ""}"
+    }
+
     suspend fun resolveApiServer(
         server: PlexServer,
         token: String,

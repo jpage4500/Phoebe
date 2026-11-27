@@ -55,6 +55,14 @@ data class SubsonicPlayHistoryStats(
     val fetchedAlbumStates: List<SubsonicAlbumPlayState>,
 )
 
+data class SubsonicFullCatalog(
+    val snapshot: CatalogSnapshot,
+    /** Fingerprint of every album in the library, keyed by album id; see [SubsonicClient.buildFullCatalog]. */
+    val albumFingerprints: Map<String, String>,
+    /** Albums whose cached tracks were reused instead of fetched. */
+    val reusedAlbumIds: Set<String>,
+)
+
 @SingleIn(AppScope::class)
 @Inject
 class SubsonicClient(
@@ -89,23 +97,52 @@ class SubsonicClient(
         username: String,
         password: String,
         onProgress: suspend (message: String, loadedAlbums: Int, totalAlbums: Int) -> Unit = { _, _, _ -> },
-    ): CatalogSnapshot {
+    ): CatalogSnapshot = buildFullCatalog(server, library, username, password, onProgress = onProgress).snapshot
+
+    /**
+     * The whole library, with one getAlbum call per album for its tracks.
+     *
+     * Each album gets a fingerprint from what the album list reports (title, artist, song count,
+     * duration, dates, genre, cover art). For each album, [reusableAlbumTracks] is asked with that
+     * fingerprint; when it returns tracks, they are used instead of fetching the album again.
+     * Stars, ratings and play counts are left out of the fingerprint: they don't change an
+     * album's track list, and stars are refreshed from getStarred2 on every sync.
+     */
+    suspend fun buildFullCatalog(
+        server: PlexServer,
+        library: MusicLibrary,
+        username: String,
+        password: String,
+        reusableAlbumTracks: (albumId: String, fingerprint: String, songCount: Int?) -> List<Track>? = { _, _, _ -> null },
+        onProgress: suspend (message: String, loadedAlbums: Int, totalAlbums: Int) -> Unit = { _, _, _ -> },
+    ): SubsonicFullCatalog {
         onProgress("Loading Subsonic artists…", 0, 0)
         val artistsFromEndpoint = artists(server, library, username, password)
         onProgress("Loading Subsonic albums…", 0, 0)
-        val albums = albums(server, library, username, password)
+        val albumDtos = albumDtos(server, username, password)
+        val albums = albumDtos.map { it.toAlbum(server.uri, username, password) }
         onProgress("Loading starred items…", 0, albums.size)
         val starred = starred(server, username, password)
         val albumsById = albums.associateBy { it.id }
-        onProgress("Indexing Subsonic songs…", 0, albums.size)
-        val tracksByAlbum = albumTracksParallel(
+        val albumFingerprints = albumDtos.associate { it.id to it.contentFingerprint() }
+        val reusedTracks = albumDtos.mapNotNull { dto ->
+            reusableAlbumTracks(dto.id, albumFingerprints.getValue(dto.id), dto.songCount)?.let { dto.id to it }
+        }.toMap()
+        val albumsToFetch = albums.filter { it.id !in reusedTracks }
+        onProgress("Indexing Subsonic songs…", 0, albumsToFetch.size)
+        val fetchedTracks = albumTracksParallel(
             server = server,
-            albums = albums,
+            albums = albumsToFetch,
             username = username,
             password = password,
             albumsById = albumsById,
         ) { loaded, total ->
             onProgress("Indexing Subsonic songs…", loaded, total)
+        }
+        // Library order, as before, so album track maps read the same either way.
+        val tracksByAlbum = LinkedHashMap<String, List<Track>>(albums.size)
+        albums.forEach { album ->
+            (reusedTracks[album.id] ?: fetchedTracks[album.id])?.let { tracksByAlbum[album.id] = it }
         }
         val albumsWithArtwork = enrichAlbumsFromTracks(albums, tracksByAlbum)
             .map { album -> if (album.id.removePrefix("navidrome:") in starred.albumIds) album.copy(favorite = true) else album }
@@ -117,12 +154,30 @@ class SubsonicClient(
         )
         val likedTracks = starred.tracks
         val playlists = playlists(server, username, password).withLikedSongs(likedTracks)
-        return CatalogSnapshot(
+        val snapshot = CatalogSnapshot(
             artists = artists,
             albums = albumsWithArtwork,
             playlists = playlists,
             tracksByParent = tracksByAlbum.withLikedSongs(likedTracks),
         )
+        return SubsonicFullCatalog(
+            snapshot = snapshot,
+            albumFingerprints = albumFingerprints,
+            reusedAlbumIds = reusedTracks.keys,
+        )
+    }
+
+    /**
+     * A cheap "has the library changed?" signal from getScanStatus: the last scan time plus the
+     * scanned file and folder counts. Null when the server doesn't report a last scan time
+     * (plain Subsonic doesn't; Navidrome does) or a scan is running right now.
+     */
+    suspend fun libraryScanFingerprint(server: PlexServer, username: String, password: String): String? {
+        val status = request<SubsonicScanStatusRoot>(server.uri, username, password, "getScanStatus")
+            .response.scanStatus ?: return null
+        if (status.scanning == true) return null
+        val lastScan = status.lastScan?.takeIf { it.isNotBlank() } ?: return null
+        return "lastScan=$lastScan;count=${status.count ?: ""};folders=${status.folderCount ?: ""}"
     }
 
     suspend fun quickCatalog(server: PlexServer, username: String, password: String): CatalogSnapshot {
@@ -330,8 +385,11 @@ class SubsonicClient(
             }
     }
 
-    suspend fun albums(server: PlexServer, library: MusicLibrary, username: String, password: String): List<Album> {
-        val albums = mutableListOf<Album>()
+    suspend fun albums(server: PlexServer, library: MusicLibrary, username: String, password: String): List<Album> =
+        albumDtos(server, username, password).map { it.toAlbum(server.uri, username, password) }
+
+    private suspend fun albumDtos(server: PlexServer, username: String, password: String): List<SubsonicAlbumDto> {
+        val albums = mutableListOf<SubsonicAlbumDto>()
         var offset = 0
         while (true) {
             val response = request<SubsonicAlbumListRoot>(server.uri, username, password, "getAlbumList2") {
@@ -341,7 +399,7 @@ class SubsonicClient(
             }
             val page = response.response.albumList2?.album.orEmpty()
             if (page.isEmpty()) break
-            albums += page.map { it.toAlbum(server.uri, username, password) }
+            albums += page
             if (page.size < SubsonicPageSize) break
             offset += page.size
         }
@@ -907,7 +965,19 @@ private data class SubsonicResponse(
     val internetRadioStations: SubsonicInternetRadioStations? = null,
     val artistInfo2: SubsonicArtistInfo2Dto? = null,
     val topSongs: SubsonicSongs? = null,
+    val scanStatus: SubsonicScanStatusDto? = null,
 )
+
+@Serializable
+private data class SubsonicScanStatusDto(
+    val scanning: Boolean? = null,
+    val count: Long? = null,
+    val folderCount: Long? = null,
+    val lastScan: String? = null,
+)
+
+@Serializable
+private data class SubsonicScanStatusRoot(@SerialName("subsonic-response") val response: SubsonicResponse = SubsonicResponse())
 
 @Serializable
 private data class SubsonicSearchResult3(
@@ -1114,6 +1184,21 @@ private fun Map<String, List<Track>>.withLikedSongs(tracks: List<Track>): Map<St
     val next = this - LIKED_SONGS_PLAYLIST_BARE_ID
     return if (tracks.isEmpty()) next else next + (LIKED_SONGS_PLAYLIST_BARE_ID to tracks)
 }
+
+/** What the album list says about an album's contents; a change means its tracks need fetching again. */
+private fun SubsonicAlbumDto.contentFingerprint(): String =
+    listOf(
+        name,
+        artist.orEmpty(),
+        artistId.orEmpty(),
+        songCount?.toString().orEmpty(),
+        duration?.toString().orEmpty(),
+        created.orEmpty(),
+        year?.toString().orEmpty(),
+        genre.orEmpty(),
+        genres.orEmpty().joinToString(",") { it.name.orEmpty() },
+        coverArt.orEmpty(),
+    ).joinToString("|")
 
 /** Null when the server reports neither a play count nor a last-played time for the album. */
 private fun SubsonicAlbumDto.playState(): SubsonicAlbumPlayState? {

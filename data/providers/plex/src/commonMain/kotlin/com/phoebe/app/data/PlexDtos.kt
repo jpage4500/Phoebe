@@ -91,6 +91,10 @@ data class PlexDirectoryDto(
     val thumb: String? = null,
     val leafCount: Int? = null,
     val addedAt: Long? = null,
+    /** Library sections only: when the section was last changed, scanned, and its content changed. */
+    val updatedAt: Long? = null,
+    val scannedAt: Long? = null,
+    val contentChangedAt: Long? = null,
     @SerialName("parentTitle") val parentTitle: String? = null,
     val year: Int? = null,
     @SerialName("originallyAvailableAt") val originallyAvailableAt: String? = null,

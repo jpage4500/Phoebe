@@ -242,6 +242,7 @@ class CatalogRepository(
     private val databaseWriteGate: DatabaseWriteGate,
 ) {
     private val json = PhoebeDataJson
+    private val remoteSyncState = RemoteSyncStateStore(database)
     private val mutableCatalog = MutableStateFlow(CatalogSnapshot())
 
     // Flips once the startup disk restore has published whatever it found (or found nothing),
@@ -1074,6 +1075,23 @@ class CatalogRepository(
         }
     }
 
+    /**
+     * Whether a launch refresh for [session] may be replaced by the lightweight sync when the
+     * server reports no library change: the cached catalog must already hold this provider's
+     * albums, and no local folders may be enabled (those are rescanned by the full refresh).
+     */
+    fun canSkipUnchangedRemoteRefresh(session: PlexSession): Boolean {
+        if (mediaSourcesRepository.state.value.localFolders.any { it.enabled }) return false
+        val prefix = "${session.providerType.catalogPrefix}:"
+        return mutableCatalog.value.albums.any { it.id.startsWith(prefix) }
+    }
+
+    /** Makes the next full Subsonic sync fetch every album again. */
+    suspend fun forgetAlbumFingerprints(session: PlexSession?) {
+        val serverId = session?.selectedServer?.id ?: return
+        remoteSyncState.clearScope(RemoteSyncStateStore.albumScope(session.providerType.catalogPrefix, serverId))
+    }
+
     suspend fun syncLightweightRemoteState(session: PlexSession?) {
         val currentSession = session ?: return
         if (currentSession.selectedServer == null || currentSession.selectedLibrary == null) return
@@ -1527,6 +1545,7 @@ class CatalogRepository(
                         var merged = CatalogSnapshot().copy(downloads = previous.downloads)
                         var incrementalPersist = false
                         var libraryShellPublished = false
+                        var fullSyncAlbumFingerprints: Pair<String, Map<String, String>>? = null
 
                         suspend fun publishNavidromeProgress(
                             raw: CatalogSnapshot,
@@ -1649,14 +1668,36 @@ class CatalogRepository(
                                     delay(SyncProgressUpdateIntervalMs)
                                 }
                             }
-                            val remoteRaw = subsonicClient.buildCatalog(
+                            // Albums whose fingerprint and song count still match the last full sync
+                            // reuse their cached tracks instead of one getAlbum call each.
+                            val albumScope = RemoteSyncStateStore.albumScope(remotePrefix, server.id)
+                            val savedAlbumFingerprints = remoteSyncState.values(albumScope)
+                            val cachedTracks = if (savedAlbumFingerprints.isEmpty()) {
+                                emptyMap()
+                            } else {
+                                tracksToPreserveDuringRefresh(previous)
+                            }
+                            val build = subsonicClient.buildFullCatalog(
                                 server = server,
                                 library = library,
                                 username = username,
                                 password = password,
+                                reusableAlbumTracks = { albumId, fingerprint, songCount ->
+                                    cachedTracks["$remotePrefix:$albumId"]?.takeIf { cached ->
+                                        savedAlbumFingerprints[albumId] == fingerprint &&
+                                            songCount != null && songCount > 0 && cached.size == songCount
+                                    }
+                                },
                             ) { _, loadedAlbums, totalAlbums ->
                                 indexedAlbumPages = loadedAlbums
                                 totalAlbumPages = totalAlbums
+                            }
+                            val remoteRaw = build.snapshot
+                            fullSyncAlbumFingerprints = albumScope to build.albumFingerprints
+                            PhoebeLog.d("CatalogRepository") {
+                                "Subsonic full sync → albums=${build.albumFingerprints.size} " +
+                                    "reused=${build.reusedAlbumIds.size} " +
+                                    "fetched=${build.albumFingerprints.size - build.reusedAlbumIds.size}"
                             }
                             progressJob.cancel()
                             if (totalAlbumPages > 0) {
@@ -1691,6 +1732,11 @@ class CatalogRepository(
                             }
                         }
                         scheduleDeferredLocalCatalogMerge(localDeferred)
+                        fullSyncAlbumFingerprints?.let { (scope, fingerprints) ->
+                            // Saved only once the sync got this far. If the tracks don't reach the
+                            // database, the song-count check above fetches those albums again.
+                            remoteSyncState.replaceScope(scope, fingerprints)
+                        }
                         publishCatalogSyncState(
                             CatalogSyncState(
                                 phase = CatalogSyncPhase.Complete,

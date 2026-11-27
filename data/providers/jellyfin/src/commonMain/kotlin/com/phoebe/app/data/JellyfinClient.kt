@@ -27,6 +27,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.joinAll
@@ -608,6 +610,31 @@ open class JellyfinClient(
             q("isFavorite", true)
             q("sortBy", "SortName")
         }
+
+    /**
+     * Number of songs and albums in [library], or, with [savedSinceMs], only those whose metadata
+     * was saved at or after that time (MinDateLastSaved). Null when the library reports nothing.
+     */
+    @OptIn(ExperimentalTime::class)
+    suspend fun libraryItemCount(
+        server: PlexServer,
+        library: MusicLibrary,
+        token: String,
+        userId: String,
+        savedSinceMs: Long? = null,
+    ): Int? {
+        if (library.key.isBlank()) return null
+        val response = items(server, token, userId = userId, fetchImages = false) {
+            q("userId", userId)
+            q("parentId", library.key)
+            q("recursive", true)
+            q("includeItemTypes", "Audio,MusicAlbum")
+            q("enableUserData", false)
+            q("limit", 0)
+            savedSinceMs?.let { q("minDateLastSaved", Instant.fromEpochMilliseconds(it).toString()) }
+        }
+        return response.TotalRecordCount
+    }
 
     private suspend fun favoriteTrackCount(server: PlexServer, library: MusicLibrary, token: String, userId: String): Int =
         items(server, token) {

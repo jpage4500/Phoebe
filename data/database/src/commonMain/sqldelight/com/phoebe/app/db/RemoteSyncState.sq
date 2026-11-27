@@ -1,0 +1,32 @@
+-- Small values a library sync keeps between runs, grouped by scope: a library's change
+-- fingerprint from the server, and each album's fingerprint so a full sync can skip albums
+-- that haven't changed. Cleared with the catalog.
+
+CREATE TABLE RemoteSyncStateRow (
+    scope TEXT NOT NULL,
+    item_key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (scope, item_key)
+);
+
+selectValue:
+SELECT value
+FROM RemoteSyncStateRow
+WHERE scope = ?
+AND item_key = ?;
+
+selectScope:
+SELECT item_key, value
+FROM RemoteSyncStateRow
+WHERE scope = ?;
+
+upsert:
+INSERT OR REPLACE INTO RemoteSyncStateRow(scope, item_key, value)
+VALUES (?, ?, ?);
+
+deleteScope:
+DELETE FROM RemoteSyncStateRow
+WHERE scope = ?;
+
+clearAll:
+DELETE FROM RemoteSyncStateRow;

@@ -1,0 +1,8 @@
+-- Saved sync fingerprints: a launch refresh skips the full download when the server reports no
+-- library change, and a full Subsonic sync only re-fetches albums whose fingerprint changed.
+CREATE TABLE RemoteSyncStateRow (
+    scope TEXT NOT NULL,
+    item_key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (scope, item_key)
+);

@@ -1886,6 +1886,8 @@ class AppState(
         dependencies.sessionRepository.setSyncMode(mode)
         if (mode == JellyfinSyncMode.Full) {
             cancelLightweightRemoteSync()
+            // Switching to Full is also the way to rebuild everything, so don't reuse cached albums.
+            dependencies.catalogSyncService.forgetSavedSyncState(session.value)
             refreshCatalogSuspended(catalogMessage = "Full sync complete.")
         } else {
             mutableMessage.value = "Quick sync is on. The next refresh loads your library a page at a time."
