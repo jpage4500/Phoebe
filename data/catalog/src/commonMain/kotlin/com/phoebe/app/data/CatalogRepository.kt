@@ -1513,7 +1513,7 @@ class CatalogRepository(
                                 downloads = previous.downloads,
                                 artists = newMerged.artists.ifEmpty { currentMerged.artists },
                                 albums = newMerged.albums.ifEmpty { currentMerged.albums },
-                                playlists = mergeDistinctPlaylists(currentMerged.playlists, newMerged.playlists),
+                                playlists = mergeDistinctPlaylists(currentMerged.playlists, newMerged.playlists, remotePrefix),
                                 tracksByParent = mergeTrackParents(
                                     currentMerged.tracksByParent,
                                     newMerged.tracksByParent,
@@ -1770,7 +1770,7 @@ class CatalogRepository(
                                 downloads = previous.downloads,
                                 artists = newMerged.artists.ifEmpty { currentMerged.artists },
                                 albums = newMerged.albums.ifEmpty { currentMerged.albums },
-                                playlists = mergeDistinctPlaylists(currentMerged.playlists, newMerged.playlists),
+                                playlists = mergeDistinctPlaylists(currentMerged.playlists, newMerged.playlists, remotePrefix),
                                 tracksByParent = mergeTrackParents(
                                     currentMerged.tracksByParent,
                                     newMerged.tracksByParent,
@@ -2855,15 +2855,23 @@ class CatalogRepository(
             acc + (parentId to mergeTrackLists(acc[parentId].orEmpty(), tracks))
         }
 
+    /**
+     * A non-empty [incoming] list is the server's full playlist list, so it replaces every
+     * [providerPrefix] playlist in [existing]: ones the server deleted (e.g. expired Octo radio
+     * stations) drop out, and the rest pick up fresh titles, counts and art. Playlists from other
+     * sources (local, smart) are kept. An empty [incoming] (e.g. getPlaylists failed) keeps [existing].
+     */
     private fun mergeDistinctPlaylists(
         existing: List<Playlist>,
         incoming: List<Playlist>,
-    ): List<Playlist> =
-        when {
-            incoming.isEmpty() -> existing
-            existing.isEmpty() -> incoming.distinctBy { it.id }
-            else -> (existing + incoming).distinctBy { it.id }
-        }
+        providerPrefix: String,
+    ): List<Playlist> {
+        if (incoming.isEmpty()) return existing
+        val fresh = incoming.distinctBy { it.id }
+        val freshIds = fresh.mapTo(HashSet()) { it.id }
+        val others = existing.filterNot { it.id in freshIds || it.id.startsWith("$providerPrefix:") }
+        return fresh + others
+    }
 
     private fun CatalogSnapshot.withPlaylistUserStateFrom(source: CatalogSnapshot): CatalogSnapshot {
         if (playlists.isEmpty()) return this
