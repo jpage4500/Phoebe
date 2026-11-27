@@ -10,6 +10,7 @@ import com.phoebe.app.platform.currentTimeMs
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.CancellationException
 
 @SingleIn(AppScope::class)
 @Inject
@@ -28,15 +29,33 @@ class NavidromePlayHistorySyncer(
         val username = session.userName
         val password = session.token.takeIf { it.isNotBlank() } ?: return NavidromePlayHistorySyncResult.Skipped
 
-        val stats = runCatching {
-            subsonicClient.playHistoryStats(server, username, password, onProgress = onProgress)
+        val prefix = session.providerType.catalogPrefix
+        val knownAlbumStates = playHistoryRepository.remoteAlbumPlayStates(prefix, server.id)
+        val fetched = runCatching {
+            subsonicClient.playHistoryStats(
+                server = server,
+                username = username,
+                password = password,
+                knownAlbumStates = knownAlbumStates,
+                onProgress = onProgress,
+            )
         }.getOrElse { error ->
+            if (error is CancellationException) throw error
             PhoebeLog.d("NavidromePlayHistorySyncer") { "play history fetch failed: ${error.message}" }
             return NavidromePlayHistorySyncResult.Skipped
         }
-        if (stats.isEmpty()) return NavidromePlayHistorySyncResult.Skipped
+        if (fetched.listedAlbums == 0) return NavidromePlayHistorySyncResult.Skipped
+        val stats = fetched.stats
+        PhoebeLog.d("NavidromePlayHistorySyncer") {
+            "play history albums → listed=${fetched.listedAlbums} " +
+                "fetched=${fetched.fetchedAlbumStates.size} known=${knownAlbumStates.size}"
+        }
+        if (stats.isEmpty()) {
+            // Nothing played since the last sync; still save states for albums that had no song stats.
+            playHistoryRepository.saveRemoteAlbumPlayStates(prefix, server.id, fetched.fetchedAlbumStates)
+            return NavidromePlayHistorySyncResult.Synced(imported = 0, seen = 0)
+        }
 
-        val prefix = session.providerType.catalogPrefix
         val catalogTracksById = catalog.tracksByParent.values
             .asSequence()
             .flatten()
@@ -83,6 +102,9 @@ class NavidromePlayHistorySyncer(
                 imported += 1
             }
         }
+
+        // Saved last, so an import that fails or is cancelled re-fetches these albums next time.
+        playHistoryRepository.saveRemoteAlbumPlayStates(source, server.id, fetched.fetchedAlbumStates)
 
         PhoebeLog.d("NavidromePlayHistorySyncer") {
             "synced Navidrome play history → seen=$seen imported=$imported"

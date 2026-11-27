@@ -1802,12 +1802,20 @@ class AppState(
             warmPlaylistTracksInBackground()
             val currentSession = session.value
             if (currentSession.isPlex() || currentSession.isEmbyFamily() || currentSession.isNavidrome()) {
-                syncRemotePlayHistory(
-                    showMessage = false,
-                    recentOnly = backgroundIfCached,
-                    warmAfterSync = !backgroundIfCached,
-                    reportProgress = !backgroundIfCached,
-                )
+                val inFlightHistorySync = playHistorySyncJob?.takeIf { it.isActive }
+                if (backgroundIfCached && inFlightHistorySync != null) {
+                    // Launch already started a play-history sync; wait for it rather than running a second copy alongside it.
+                    inFlightHistorySync.join()
+                } else {
+                    // A manual refresh shows its own progress, so replace any background sync still running.
+                    inFlightHistorySync?.cancel()
+                    syncRemotePlayHistory(
+                        showMessage = false,
+                        recentOnly = backgroundIfCached,
+                        warmAfterSync = !backgroundIfCached,
+                        reportProgress = !backgroundIfCached,
+                    )
+                }
             } else {
                 syncRemotePlayHistoryInBackground()
             }

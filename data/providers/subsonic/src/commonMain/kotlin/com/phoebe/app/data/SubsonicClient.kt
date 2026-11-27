@@ -39,6 +39,22 @@ data class SubsonicSongPlayStat(
     val lastPlayedMs: Long?,
 )
 
+/** An album's play count and last-played time as the album list reports them. */
+data class SubsonicAlbumPlayState(
+    val albumId: String,
+    val playCount: Long,
+    val played: String,
+)
+
+data class SubsonicPlayHistoryStats(
+    /** Albums in the "frequent" and "recent" lists; zero means the server has no play history. */
+    val listedAlbums: Int,
+    /** Song stats from the albums that were fetched this time. */
+    val stats: List<SubsonicSongPlayStat>,
+    /** Play state of each album fetched this time. Save these once [stats] are imported. */
+    val fetchedAlbumStates: List<SubsonicAlbumPlayState>,
+)
+
 @SingleIn(AppScope::class)
 @Inject
 class SubsonicClient(
@@ -212,34 +228,52 @@ class SubsonicClient(
         return response.response.song?.toTrack(server.uri, username, password)
     }
 
-    suspend fun albumListByType(
+    private suspend fun albumListByType(
         server: PlexServer,
         username: String,
         password: String,
         type: String,
         size: Int = SubsonicPlayHistoryAlbumListSize,
-    ): List<Album> {
+    ): List<SubsonicAlbumDto> {
         val response = request<SubsonicAlbumListRoot>(server.uri, username, password, "getAlbumList2") {
             parameter("type", type)
             parameter("size", size.coerceIn(1, SubsonicPageSize))
             parameter("offset", 0)
         }
-        return response.response.albumList2?.album.orEmpty().map { it.toAlbum(server.uri, username, password) }
+        return response.response.albumList2?.album.orEmpty()
     }
 
+    /**
+     * Song play stats from the most played and most recently played albums.
+     *
+     * The album lists report each album's play count and last-played time, so an album whose
+     * values match [knownAlbumStates] is skipped: its songs haven't been played since the last
+     * sync. Albums the server reports neither value for are always fetched.
+     */
     suspend fun playHistoryStats(
         server: PlexServer,
         username: String,
         password: String,
+        knownAlbumStates: Map<String, SubsonicAlbumPlayState> = emptyMap(),
         maxAlbumsPerList: Int = SubsonicPlayHistoryAlbumListSize,
         parallelism: Int = 8,
         onProgress: suspend (loaded: Int, total: Int) -> Unit = { _, _ -> },
-    ): List<SubsonicSongPlayStat> {
-        val albums = (
+    ): SubsonicPlayHistoryStats {
+        val listed = (
             albumListByType(server, username, password, "frequent", maxAlbumsPerList) +
                 albumListByType(server, username, password, "recent", maxAlbumsPerList)
             ).distinctBy { it.id }
-        if (albums.isEmpty()) return emptyList()
+        val changed = listed.filter { dto ->
+            val state = dto.playState() ?: return@filter true
+            knownAlbumStates[dto.id] != state
+        }
+        val result = SubsonicPlayHistoryStats(
+            listedAlbums = listed.size,
+            stats = emptyList(),
+            fetchedAlbumStates = changed.mapNotNull { it.playState() },
+        )
+        if (changed.isEmpty()) return result
+        val albums = changed.map { it.toAlbum(server.uri, username, password) }
         // Fetched in parallel chunks: one at a time this was ~1.5s per album through Octo (~90s for 60).
         // Chunk results keep album order, so the merge below is unchanged.
         val songsByAlbum = ArrayList<Pair<Album, List<SubsonicSongDto>>>(albums.size)
@@ -277,7 +311,7 @@ class SubsonicClient(
                 )
             }
         }
-        return statsBySongId.values.toList()
+        return result.copy(stats = statsBySongId.values.toList())
     }
 
     suspend fun artists(server: PlexServer, library: MusicLibrary, username: String, password: String): List<Artist> {
@@ -1079,6 +1113,16 @@ private fun List<Playlist>.withLikedSongs(tracks: List<Track>): List<Playlist> {
 private fun Map<String, List<Track>>.withLikedSongs(tracks: List<Track>): Map<String, List<Track>> {
     val next = this - LIKED_SONGS_PLAYLIST_BARE_ID
     return if (tracks.isEmpty()) next else next + (LIKED_SONGS_PLAYLIST_BARE_ID to tracks)
+}
+
+/** Null when the server reports neither a play count nor a last-played time for the album. */
+private fun SubsonicAlbumDto.playState(): SubsonicAlbumPlayState? {
+    if (playCount == null && played == null) return null
+    return SubsonicAlbumPlayState(
+        albumId = id,
+        playCount = playCount?.toLong() ?: 0L,
+        played = played.orEmpty(),
+    )
 }
 
 private fun SubsonicAlbumDto.toAlbum(baseUrl: String, username: String, password: String): Album =

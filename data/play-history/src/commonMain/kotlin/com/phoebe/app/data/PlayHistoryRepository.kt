@@ -258,6 +258,36 @@ class PlayHistoryRepository(
             database.playHistoryQueries.selectMaxImportedRemoteStatsLastPlayedAt(source, serverId).awaitAsOneOrNull()?.lastPlayed
         }
 
+    /** Album play states saved by the last play-history sync, keyed by album id. */
+    suspend fun remoteAlbumPlayStates(source: String, serverId: String): Map<String, SubsonicAlbumPlayState> =
+        withContext(databaseDispatcher) {
+            database.playHistoryQueries.selectRemoteAlbumPlayStates(source, serverId).awaitAsList()
+                .associate { row ->
+                    row.album_id to SubsonicAlbumPlayState(
+                        albumId = row.album_id,
+                        playCount = row.play_count,
+                        played = row.last_played,
+                    )
+                }
+        }
+
+    suspend fun saveRemoteAlbumPlayStates(source: String, serverId: String, states: List<SubsonicAlbumPlayState>) {
+        if (states.isEmpty()) return
+        withContext(databaseDispatcher) {
+            database.transaction {
+                states.forEach { state ->
+                    database.playHistoryQueries.upsertRemoteAlbumPlayState(
+                        source = source,
+                        server_id = serverId,
+                        album_id = state.albumId,
+                        play_count = state.playCount,
+                        last_played = state.played,
+                    )
+                }
+            }
+        }
+    }
+
     suspend fun maxPlexStatsLastPlayedAt(serverId: String): Long? =
         withContext(databaseDispatcher) {
             database.playHistoryQueries.selectMaxPlexStatsLastPlayedAt(serverId).awaitAsOneOrNull()?.lastPlayed

@@ -10,6 +10,7 @@ suspend fun PhoebeDatabase.clearAllAppData(clearPlayHistory: Boolean = true) = w
         if (clearPlayHistory) {
             playHistoryQueries.clearAll()
             playHistoryQueries.clearAllAggregates()
+            playHistoryQueries.clearRemoteAlbumPlayStates()
         }
         recentMixTrackQueries.clearAll()
         lyricsQueries.clearGeniusAnnotations()

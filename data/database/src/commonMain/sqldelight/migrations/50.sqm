@@ -1,0 +1,10 @@
+-- Remembers each album's play count and last-played time from the server, so Subsonic play-history
+-- sync only re-fetches albums that were played since the last sync.
+CREATE TABLE RemoteAlbumPlayStateRow (
+    source TEXT NOT NULL,
+    server_id TEXT NOT NULL,
+    album_id TEXT NOT NULL,
+    play_count INTEGER NOT NULL,
+    last_played TEXT NOT NULL,
+    PRIMARY KEY (source, server_id, album_id)
+);

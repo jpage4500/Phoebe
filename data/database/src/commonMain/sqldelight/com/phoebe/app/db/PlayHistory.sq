@@ -33,6 +33,17 @@ CREATE TABLE PlayCountAggregateRow (
 
 CREATE INDEX play_count_aggregate_source_idx ON PlayCountAggregateRow(source, server_id);
 
+-- Each album's play count and last-played time as a remote server last reported them, so a
+-- play-history sync can skip albums nobody has played since. Cleared with play history.
+CREATE TABLE RemoteAlbumPlayStateRow (
+    source TEXT NOT NULL,
+    server_id TEXT NOT NULL,
+    album_id TEXT NOT NULL,
+    play_count INTEGER NOT NULL,
+    last_played TEXT NOT NULL,
+    PRIMARY KEY (source, server_id, album_id)
+);
+
 recordPlay:
 INSERT INTO PlayHistoryRow(track_id, artist, album, played_at_ms)
 VALUES (?, ?, ?, ?);
@@ -372,3 +383,16 @@ DELETE FROM PlayHistoryRow;
 
 clearAllAggregates:
 DELETE FROM PlayCountAggregateRow;
+
+selectRemoteAlbumPlayStates:
+SELECT album_id, play_count, last_played
+FROM RemoteAlbumPlayStateRow
+WHERE source = ?
+AND server_id = ?;
+
+upsertRemoteAlbumPlayState:
+INSERT OR REPLACE INTO RemoteAlbumPlayStateRow(source, server_id, album_id, play_count, last_played)
+VALUES (?, ?, ?, ?, ?);
+
+clearRemoteAlbumPlayStates:
+DELETE FROM RemoteAlbumPlayStateRow;
