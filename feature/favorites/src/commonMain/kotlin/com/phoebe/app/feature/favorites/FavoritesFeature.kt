@@ -16,6 +16,7 @@ import com.phoebe.app.feature.library.FavoriteArtistsDesktopView
 import com.phoebe.app.feature.library.FavoriteArtistsMobileView
 import com.phoebe.app.feature.library.FavoritePlaylistsDesktopView
 import com.phoebe.app.feature.library.FavoritePlaylistsMobileView
+import com.phoebe.app.feature.library.LibraryFilterTab
 
 @Immutable
 data class FavoritePlaylistsRouteState(
@@ -37,8 +38,8 @@ data class FavoriteArtistsRouteState(
 )
 
 class FavoriteArtistsRouteActions(
-    val onLibrarySortBy: (LibrarySortBy) -> Unit,
-    val onLibraryAscending: (Boolean) -> Unit,
+    val onLibrarySortBy: (LibraryFilterTab, LibrarySortBy) -> Unit,
+    val onLibraryAscending: (LibraryFilterTab, Boolean) -> Unit,
     val onArtist: (Artist) -> Unit,
     val onBack: () -> Unit,
     val onSearchQuery: (String) -> Unit = {},
@@ -53,8 +54,8 @@ data class FavoriteAlbumsRouteState(
 )
 
 class FavoriteAlbumsRouteActions(
-    val onLibrarySortBy: (LibrarySortBy) -> Unit,
-    val onLibraryAscending: (Boolean) -> Unit,
+    val onLibrarySortBy: (LibraryFilterTab, LibrarySortBy) -> Unit,
+    val onLibraryAscending: (LibraryFilterTab, Boolean) -> Unit,
     val onAlbum: (Album) -> Unit,
     val onBack: () -> Unit,
     val onSearchQuery: (String) -> Unit = {},

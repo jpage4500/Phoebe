@@ -173,7 +173,7 @@ class AppDependencies(
             databaseWriteGate.withWrite {
                 privilegedDatabase.clearAllAppData(clearPlayHistory = true)
             }
-            listOf("session.json", "catalog.json", "media_sources.json", "library_ui_prefs.json", "library_view_mode.txt").forEach {
+            listOf("session.json", "catalog.json", "media_sources.json", "library_ui_prefs.json", "library_view_mode.txt", "library_tab_prefs.json").forEach {
                 platformStorage.delete(it)
             }
             catalogRepository.clearInMemoryCatalog()

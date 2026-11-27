@@ -136,8 +136,8 @@ private fun PlaylistsDesktopRoutePreview() {
 private fun previewLibraryActions(): LibraryRouteActions =
     LibraryRouteActions(
         onFilter = {},
-        onLibrarySortBy = {},
-        onLibraryAscending = {},
+        onLibrarySortBy = { _, _ -> },
+        onLibraryAscending = { _, _ -> },
         onLibraryColumns = {},
         onArtist = {},
         onAlbum = {},

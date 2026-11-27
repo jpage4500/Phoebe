@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class LibraryPreferencesServiceDesktopTest {
     @Test
@@ -73,8 +74,11 @@ class LibraryPreferencesServiceDesktopTest {
                 discoveryWeight = 15,
             )
 
-            service.setSortBy(LibrarySortBy.DateAdded)
-            service.setAscending(false)
+            service.setSortBy("Artists", LibrarySortBy.Name)
+            service.setAscending("Artists", true)
+            service.setSortBy("Albums", LibrarySortBy.Year)
+            service.setAscending("Albums", false)
+            service.setViewMode("Albums", "List")
             service.setHomeSections(listOf(HomeSection.RecentSongs, HomeSection.FavoriteAlbums))
             service.setPersonalMix(personalMix)
             service.setAlbumGridItemSize(188)
@@ -82,8 +86,16 @@ class LibraryPreferencesServiceDesktopTest {
 
             val restored = LibraryUiRepository(database, PlatformStorage()).apply { restore() }
             val preferences = restored.preferences.value
-            assertEquals(LibrarySortBy.DateAdded, preferences.sortBy)
-            assertFalse(preferences.ascending)
+            val artists = preferences.forTab("Artists")
+            assertEquals(LibrarySortBy.Name, artists.sortBy)
+            assertTrue(artists.ascending)
+            assertEquals("Grid", artists.viewMode)
+            val albums = preferences.forTab("Albums")
+            assertEquals(LibrarySortBy.Year, albums.sortBy)
+            assertFalse(albums.ascending)
+            assertEquals("List", albums.viewMode)
+            // A tab nobody has touched still uses the shared defaults.
+            assertEquals(preferences.sortBy, preferences.forTab("Songs").sortBy)
             assertEquals(listOf(HomeSection.RecentSongs, HomeSection.FavoriteAlbums), preferences.homeSections.take(2))
             assertEquals(personalMix, preferences.personalMix)
             assertEquals(188, preferences.albumGridItemSizeDp)

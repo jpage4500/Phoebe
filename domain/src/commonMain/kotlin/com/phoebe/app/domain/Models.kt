@@ -1065,6 +1065,13 @@ data class LibraryColumnVisibility(
 )
 
 @Serializable
+data class LibraryTabPreferences(
+    val sortBy: LibrarySortBy,
+    val ascending: Boolean,
+    val viewMode: String,
+)
+
+@Serializable
 data class LibraryUiPreferences(
     val sortBy: LibrarySortBy = LibrarySortBy.Year,
     val ascending: Boolean = true,
@@ -1078,7 +1085,24 @@ data class LibraryUiPreferences(
     val artistGridItemSizeDp: Int = DefaultArtistGridItemSizeDp,
     /** Library content layout: Grid, List, or Flow. */
     val viewMode: String = "Grid",
+    /**
+     * Sort, order and view saved separately for each library tab (Artists, Albums, Songs), keyed by
+     * tab name. A tab with no entry yet uses the shared [sortBy], [ascending] and [viewMode].
+     */
+    val tabs: Map<String, LibraryTabPreferences> = emptyMap(),
 ) {
+    /** These preferences with [sortBy], [ascending] and [viewMode] taken from [tab]'s saved entry. */
+    fun forTab(tab: String): LibraryUiPreferences {
+        val saved = tabs[tab] ?: return this
+        return copy(sortBy = saved.sortBy, ascending = saved.ascending, viewMode = saved.viewMode)
+    }
+
+    /** Changes [tab]'s saved entry, starting from the shared values when it has none yet. */
+    fun updateTab(tab: String, change: (LibraryTabPreferences) -> LibraryTabPreferences): LibraryUiPreferences {
+        val current = tabs[tab] ?: LibraryTabPreferences(sortBy = sortBy, ascending = ascending, viewMode = viewMode)
+        return copy(tabs = tabs + (tab to change(current)))
+    }
+
     fun normalized(): LibraryUiPreferences =
         copy(
             mobileBottomTabs = mobileBottomTabs.normalizedMobileBottomTabs(),

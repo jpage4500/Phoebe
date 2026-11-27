@@ -5,6 +5,7 @@ import com.phoebe.app.db.PhoebeDatabase
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.HomeSection
 import com.phoebe.app.domain.LibrarySortBy
+import com.phoebe.app.domain.LibraryTabPreferences
 import com.phoebe.app.domain.LibraryUiPreferences
 import com.phoebe.app.domain.MobileBottomTab
 import com.phoebe.app.domain.PersonalMixPreferences
@@ -19,6 +20,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 
 @SingleIn(AppScope::class)
 @Inject
@@ -47,8 +50,8 @@ class LibraryUiRepository(
             val prefs = row.toPreferences().normalized()
             val viewMode = withContext(Dispatchers.Default) {
                 storage.readText(ViewModeFile)
-            }?.takeIf { it in setOf("Grid", "List", "Flow", "Immersive") } ?: prefs.viewMode
-            val resolved = prefs.copy(viewMode = viewMode)
+            }?.takeIf { it in ViewModes } ?: prefs.viewMode
+            val resolved = prefs.copy(viewMode = viewMode, tabs = readTabs())
             mutableState.value = resolved
             // Persist migrations (e.g. Charts tab inserted into legacy defaults).
             val desiredTabs = resolved.mobileBottomTabs.joinToString(",") { it.name }
@@ -67,12 +70,12 @@ class LibraryUiRepository(
         storage.delete(LegacyPrefsFile)
     }
 
-    suspend fun setSortBy(sortBy: LibrarySortBy) {
-        save(mutableState.value.copy(sortBy = sortBy))
+    suspend fun setSortBy(tab: String, sortBy: LibrarySortBy) {
+        saveTab(tab) { it.copy(sortBy = sortBy) }
     }
 
-    suspend fun setAscending(ascending: Boolean) {
-        save(mutableState.value.copy(ascending = ascending))
+    suspend fun setAscending(tab: String, ascending: Boolean) {
+        saveTab(tab) { it.copy(ascending = ascending) }
     }
 
     suspend fun setColumns(columns: LibraryColumnVisibility) {
@@ -102,14 +105,30 @@ class LibraryUiRepository(
         save(mutableState.value.normalized().copy(artistGridItemSizeDp = sizeDp))
     }
 
-    suspend fun setViewMode(viewMode: String) {
-        val normalized = viewMode.takeIf { it in setOf("Grid", "List", "Flow", "Immersive") } ?: "Grid"
-        val next = mutableState.value.copy(viewMode = normalized)
+    suspend fun setViewMode(tab: String, viewMode: String) {
+        val normalized = viewMode.takeIf { it in ViewModes } ?: "Grid"
+        saveTab(tab) { it.copy(viewMode = normalized) }
+    }
+
+    /** Per-tab sort/order/view live in their own file, like the view mode, so the SQLite schema stays put. */
+    private suspend fun saveTab(tab: String, change: (LibraryTabPreferences) -> LibraryTabPreferences) {
+        val next = mutableState.value.updateTab(tab, change)
         mutableState.value = next
         withContext(Dispatchers.Default) {
+            // Keep the SQLite row present: restore() only reads the tab file once that row exists.
             persist(next)
-            storage.writeText(ViewModeFile, normalized)
+            storage.writeText(TabPrefsFile, json.encodeToString(TabPrefsSerializer, next.tabs))
         }
+    }
+
+    private suspend fun readTabs(): Map<String, LibraryTabPreferences> {
+        val raw = withContext(Dispatchers.Default) { storage.readText(TabPrefsFile) } ?: return emptyMap()
+        return runCatching { json.decodeFromString(TabPrefsSerializer, raw) }
+            .getOrElse { error ->
+                PhoebeLog.d("LibraryUiRepository") { "Could not read library tab prefs: ${error.message}" }
+                emptyMap()
+            }
+            .mapValues { (_, prefs) -> prefs.copy(viewMode = prefs.viewMode.takeIf { it in ViewModes } ?: "Grid") }
     }
 
     /** Updates UI state immediately; pair with [persistCurrentToDisk] on a background coroutine. */
@@ -182,6 +201,9 @@ class LibraryUiRepository(
     private companion object {
         const val LegacyPrefsFile = "library_ui_prefs.json"
         const val ViewModeFile = "library_view_mode.txt"
+        const val TabPrefsFile = "library_tab_prefs.json"
+        val ViewModes = setOf("Grid", "List", "Flow", "Immersive")
+        val TabPrefsSerializer = MapSerializer(String.serializer(), LibraryTabPreferences.serializer())
     }
 }
 

@@ -3,6 +3,7 @@ package com.phoebe.app.feature.favorites
 import androidx.lifecycle.ViewModel
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
+import com.phoebe.app.feature.library.LibraryFilterTab
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,12 +37,12 @@ class FavoriteArtistsViewModel : ViewModel() {
         mutableState.update { it?.copy(searchQuery = query) }
     }
 
-    fun onLibrarySortBy(sortBy: LibrarySortBy) {
-        mutableState.update { it?.copy(libraryUi = it.libraryUi.copy(sortBy = sortBy)) }
+    fun onLibrarySortBy(tab: LibraryFilterTab, sortBy: LibrarySortBy) {
+        mutableState.update { it?.copy(libraryUi = it.libraryUi.updateTab(tab.name) { prefs -> prefs.copy(sortBy = sortBy) }) }
     }
 
-    fun onLibraryAscending(ascending: Boolean) {
-        mutableState.update { it?.copy(libraryUi = it.libraryUi.copy(ascending = ascending)) }
+    fun onLibraryAscending(tab: LibraryFilterTab, ascending: Boolean) {
+        mutableState.update { it?.copy(libraryUi = it.libraryUi.updateTab(tab.name) { prefs -> prefs.copy(ascending = ascending) }) }
     }
 
     fun onLibraryColumns(columns: LibraryColumnVisibility) {
@@ -62,12 +63,12 @@ class FavoriteAlbumsViewModel : ViewModel() {
         mutableState.update { it?.copy(searchQuery = query) }
     }
 
-    fun onLibrarySortBy(sortBy: LibrarySortBy) {
-        mutableState.update { it?.copy(libraryUi = it.libraryUi.copy(sortBy = sortBy)) }
+    fun onLibrarySortBy(tab: LibraryFilterTab, sortBy: LibrarySortBy) {
+        mutableState.update { it?.copy(libraryUi = it.libraryUi.updateTab(tab.name) { prefs -> prefs.copy(sortBy = sortBy) }) }
     }
 
-    fun onLibraryAscending(ascending: Boolean) {
-        mutableState.update { it?.copy(libraryUi = it.libraryUi.copy(ascending = ascending)) }
+    fun onLibraryAscending(tab: LibraryFilterTab, ascending: Boolean) {
+        mutableState.update { it?.copy(libraryUi = it.libraryUi.updateTab(tab.name) { prefs -> prefs.copy(ascending = ascending) }) }
     }
 
     fun onLibraryColumns(columns: LibraryColumnVisibility) {

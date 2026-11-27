@@ -200,15 +200,16 @@ fun FavoriteArtistsDesktopView(
     libraryUi: LibraryUiPreferences,
     searchQuery: String,
     onSearchQuery: (String) -> Unit,
-    onLibrarySortBy: (LibrarySortBy) -> Unit,
-    onLibraryAscending: (Boolean) -> Unit,
+    onLibrarySortBy: (LibraryFilterTab, LibrarySortBy) -> Unit,
+    onLibraryAscending: (LibraryFilterTab, Boolean) -> Unit,
     onArtist: (Artist) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var viewMode by remember { mutableStateOf(LibraryViewMode.Grid) }
-    val sortedArtists = remember(catalog, libraryUi.sortBy, libraryUi.ascending) {
-        sortArtistsForLibrary(catalog, libraryUi.sortBy, libraryUi.ascending).filter { it.favorite }
+    val tabUi = libraryUi.forTab(LibraryFilterTab.Artists.name)
+    val sortedArtists = remember(catalog, tabUi.sortBy, tabUi.ascending) {
+        sortArtistsForLibrary(catalog, tabUi.sortBy, tabUi.ascending).filter { it.favorite }
     }
     var visibleArtistsResult by remember { mutableStateOf<List<Artist>?>(null) }
     LaunchedEffect(sortedArtists, searchQuery) {
@@ -226,11 +227,11 @@ fun FavoriteArtistsDesktopView(
         toolbar = {
             FavoriteLibraryToolbar(
                 filter = LibraryFilterTab.Artists,
-                prefs = libraryUi,
+                prefs = tabUi,
                 viewMode = viewMode,
                 onViewMode = { viewMode = it },
-                onSortBy = onLibrarySortBy,
-                onAscending = onLibraryAscending,
+                onSortBy = { onLibrarySortBy(LibraryFilterTab.Artists, it) },
+                onAscending = { onLibraryAscending(LibraryFilterTab.Artists, it) },
             )
         },
         modifier = modifier,
@@ -240,8 +241,8 @@ fun FavoriteArtistsDesktopView(
             artists = visibleArtists,
             viewMode = viewMode,
             artistGridItemSizeDp = libraryUi.artistGridItemSizeDp,
-            sortBy = libraryUi.sortBy,
-            ascending = libraryUi.ascending,
+            sortBy = tabUi.sortBy,
+            ascending = tabUi.ascending,
             onArtist = onArtist,
             modifier = Modifier.fillMaxSize(),
         )
@@ -254,16 +255,17 @@ fun FavoriteAlbumsDesktopView(
     libraryUi: LibraryUiPreferences,
     searchQuery: String,
     onSearchQuery: (String) -> Unit,
-    onLibrarySortBy: (LibrarySortBy) -> Unit,
-    onLibraryAscending: (Boolean) -> Unit,
+    onLibrarySortBy: (LibraryFilterTab, LibrarySortBy) -> Unit,
+    onLibraryAscending: (LibraryFilterTab, Boolean) -> Unit,
     onAlbum: (Album) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var selectedAlbumId by remember { mutableStateOf<String?>(null) }
     var viewMode by remember { mutableStateOf(LibraryViewMode.Grid) }
-    val sortedAlbums = remember(catalog.albums, libraryUi.sortBy, libraryUi.ascending) {
-        sortAlbumsForLibrary(catalog.albums, libraryUi.sortBy, libraryUi.ascending).filter { it.favorite }
+    val tabUi = libraryUi.forTab(LibraryFilterTab.Albums.name)
+    val sortedAlbums = remember(catalog.albums, tabUi.sortBy, tabUi.ascending) {
+        sortAlbumsForLibrary(catalog.albums, tabUi.sortBy, tabUi.ascending).filter { it.favorite }
     }
     var visibleAlbumsResult by remember { mutableStateOf<List<Album>?>(null) }
     LaunchedEffect(sortedAlbums, searchQuery) {
@@ -284,11 +286,11 @@ fun FavoriteAlbumsDesktopView(
         toolbar = {
             FavoriteLibraryToolbar(
                 filter = LibraryFilterTab.Albums,
-                prefs = libraryUi,
+                prefs = tabUi,
                 viewMode = viewMode,
                 onViewMode = { viewMode = it },
-                onSortBy = onLibrarySortBy,
-                onAscending = onLibraryAscending,
+                onSortBy = { onLibrarySortBy(LibraryFilterTab.Albums, it) },
+                onAscending = { onLibraryAscending(LibraryFilterTab.Albums, it) },
             )
         },
         modifier = modifier,
@@ -299,8 +301,8 @@ fun FavoriteAlbumsDesktopView(
             selectedAlbumId = selectedAlbumId,
             viewMode = viewMode,
             albumGridItemSizeDp = libraryUi.albumGridItemSizeDp,
-            sortBy = libraryUi.sortBy,
-            ascending = libraryUi.ascending,
+            sortBy = tabUi.sortBy,
+            ascending = tabUi.ascending,
             onSelect = { selectedAlbumId = it.id },
             onOpen = onAlbum,
             modifier = Modifier.fillMaxSize(),
@@ -446,10 +448,10 @@ fun LibraryDesktopView(
     filter: LibraryFilterTab,
     libraryUi: LibraryUiPreferences,
     onFilter: (LibraryFilterTab) -> Unit,
-    onLibrarySortBy: (LibrarySortBy) -> Unit,
-    onLibraryAscending: (Boolean) -> Unit,
+    onLibrarySortBy: (LibraryFilterTab, LibrarySortBy) -> Unit,
+    onLibraryAscending: (LibraryFilterTab, Boolean) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
-    onLibraryViewMode: (LibraryViewMode) -> Unit = {},
+    onLibraryViewMode: (LibraryFilterTab, LibraryViewMode) -> Unit = { _, _ -> },
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
     onPlayTracks: (List<Track>, Int) -> Unit,
@@ -464,17 +466,19 @@ fun LibraryDesktopView(
 ) {
     var selectedAlbumId by remember { mutableStateOf<String?>(null) }
     var selectedTrackId by remember { mutableStateOf<String?>(null) }
-    val libraryViewMode = libraryUi.resolvedViewMode()
+    // Each tab keeps its own sort, order and view.
+    val tabUi = libraryUi.forTab(filter.name)
+    val libraryViewMode = tabUi.resolvedViewMode()
     var songFilter by remember { mutableStateOf(SongFileFilter.All) }
     var pageIndex by remember(filter) { mutableStateOf(0) }
 
-    val ascending = libraryUi.ascending
-    val sortBy = libraryUi.sortBy
+    val ascending = tabUi.ascending
+    val sortBy = tabUi.sortBy
 
     // If the persisted sort key doesn't apply to the current tab, repair it once.
     LaunchedEffect(filter, sortBy) {
         val normalized = normalizeSortKey(filter, sortBy)
-        if (normalized != sortBy) onLibrarySortBy(normalized)
+        if (normalized != sortBy) onLibrarySortBy(filter, normalized)
     }
 
     val sortedArtists = remember(catalog.artists, sortBy, ascending) {
@@ -562,12 +566,12 @@ fun LibraryDesktopView(
             LibraryToolbarRow(
                 filter = filter,
                 onFilter = onFilter,
-                prefs = libraryUi,
-                onSortBy = onLibrarySortBy,
-                onAscending = onLibraryAscending,
+                prefs = tabUi,
+                onSortBy = { onLibrarySortBy(filter, it) },
+                onAscending = { onLibraryAscending(filter, it) },
                 onColumns = onLibraryColumns,
                 libraryViewMode = libraryViewMode,
-                onLibraryViewMode = onLibraryViewMode,
+                onLibraryViewMode = { onLibraryViewMode(filter, it) },
                 songFilter = songFilter,
                 onSongFilter = { songFilter = it },
             )

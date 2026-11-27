@@ -206,8 +206,8 @@ fun LibraryPanel(
     filter: LibraryFilterTab,
     libraryUi: LibraryUiPreferences,
     onFilter: (LibraryFilterTab) -> Unit,
-    onLibrarySortBy: (LibrarySortBy) -> Unit,
-    onLibraryAscending: (Boolean) -> Unit,
+    onLibrarySortBy: (LibraryFilterTab, LibrarySortBy) -> Unit,
+    onLibraryAscending: (LibraryFilterTab, Boolean) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
     onPlaylist: (Playlist) -> Unit,
     onArtist: (Artist) -> Unit,
@@ -221,8 +221,9 @@ fun LibraryPanel(
     val allTracksRaw = remember(catalog.tracksByParent) {
         catalog.tracksByParent.values.asSequence().flatten().distinctBy { it.id }.toList()
     }
-    val sortBy = libraryUi.sortBy
-    val ascending = libraryUi.ascending
+    val tabUi = libraryUi.forTab(filter.name)
+    val sortBy = tabUi.sortBy
+    val ascending = tabUi.ascending
     val sortedArtists = remember(catalog.artists, sortBy, ascending) {
         sortArtistsForLibrary(catalog, sortBy, ascending)
     }
@@ -279,9 +280,9 @@ fun LibraryPanel(
             }
             item(contentType = "library-sort") {
                 LibrarySortAndDisplayBar(
-                    prefs = libraryUi,
-                    onSortBy = onLibrarySortBy,
-                    onAscending = onLibraryAscending,
+                    prefs = tabUi,
+                    onSortBy = { onLibrarySortBy(filter, it) },
+                    onAscending = { onLibraryAscending(filter, it) },
                     onColumns = onLibraryColumns,
                     showColumns = filter == LibraryFilterTab.Songs,
                 )

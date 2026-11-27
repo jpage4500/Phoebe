@@ -215,10 +215,10 @@ internal data class BrowseActions(
     val onArtistEvents: (Artist) -> Unit = {},
     val onDownloadAlbum: (Album) -> Unit,
     val onDownloadPlaylist: (Playlist) -> Unit,
-    val onLibrarySortBy: (LibrarySortBy) -> Unit,
-    val onLibraryAscending: (Boolean) -> Unit,
+    val onLibrarySortBy: (LibraryFilterTab, LibrarySortBy) -> Unit,
+    val onLibraryAscending: (LibraryFilterTab, Boolean) -> Unit,
     val onLibraryColumns: (LibraryColumnVisibility) -> Unit,
-    val onLibraryViewMode: (LibraryViewMode) -> Unit = {},
+    val onLibraryViewMode: (LibraryFilterTab, LibraryViewMode) -> Unit = { _, _ -> },
     val onInstallUpdate: () -> Unit = {},
 )
 

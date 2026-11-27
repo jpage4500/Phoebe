@@ -26,12 +26,12 @@ class LibraryViewModel : ViewModel() {
         mutableState.update { it?.copy(searchQuery = query) }
     }
 
-    fun onLibrarySortBy(sortBy: LibrarySortBy) {
-        mutableState.update { it?.copy(libraryUi = it.libraryUi.copy(sortBy = sortBy)) }
+    fun onLibrarySortBy(tab: LibraryFilterTab, sortBy: LibrarySortBy) {
+        mutableState.update { it?.copy(libraryUi = it.libraryUi.updateTab(tab.name) { prefs -> prefs.copy(sortBy = sortBy) }) }
     }
 
-    fun onLibraryAscending(ascending: Boolean) {
-        mutableState.update { it?.copy(libraryUi = it.libraryUi.copy(ascending = ascending)) }
+    fun onLibraryAscending(tab: LibraryFilterTab, ascending: Boolean) {
+        mutableState.update { it?.copy(libraryUi = it.libraryUi.updateTab(tab.name) { prefs -> prefs.copy(ascending = ascending) }) }
     }
 
     fun onLibraryColumns(columns: LibraryColumnVisibility) {

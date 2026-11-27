@@ -32,10 +32,10 @@ data class LibraryRouteState(
 @Immutable
 class LibraryRouteActions(
     val onFilter: (LibraryFilterTab) -> Unit,
-    val onLibrarySortBy: (LibrarySortBy) -> Unit,
-    val onLibraryAscending: (Boolean) -> Unit,
+    val onLibrarySortBy: (LibraryFilterTab, LibrarySortBy) -> Unit,
+    val onLibraryAscending: (LibraryFilterTab, Boolean) -> Unit,
     val onLibraryColumns: (LibraryColumnVisibility) -> Unit,
-    val onLibraryViewMode: (LibraryViewMode) -> Unit = {},
+    val onLibraryViewMode: (LibraryFilterTab, LibraryViewMode) -> Unit = { _, _ -> },
     val onArtist: (Artist) -> Unit,
     val onAlbum: (Album) -> Unit,
     val onPlayTracks: (List<Track>, Int) -> Unit,

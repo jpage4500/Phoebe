@@ -21,6 +21,7 @@ import com.phoebe.app.domain.JellyfinSyncMode
 import com.phoebe.app.domain.JellyfinLibraryPageKind
 import com.phoebe.app.domain.LibraryColumnVisibility
 import com.phoebe.app.domain.LibrarySortBy
+import com.phoebe.app.feature.library.LibraryFilterTab
 import com.phoebe.app.domain.LibraryTab
 import com.phoebe.app.domain.LyricsLoadState
 import com.phoebe.app.domain.MediaProviderType
@@ -3720,12 +3721,12 @@ class AppState(
         }
     }
 
-    fun setLibrarySortBy(sortBy: LibrarySortBy) = scope.launch {
-        dependencies.libraryPreferencesService.setSortBy(sortBy)
+    fun setLibrarySortBy(tab: LibraryFilterTab, sortBy: LibrarySortBy) = scope.launch {
+        dependencies.libraryPreferencesService.setSortBy(tab.name, sortBy)
     }
 
-    fun setLibrarySortAscending(ascending: Boolean) = scope.launch {
-        dependencies.libraryPreferencesService.setAscending(ascending)
+    fun setLibrarySortAscending(tab: LibraryFilterTab, ascending: Boolean) = scope.launch {
+        dependencies.libraryPreferencesService.setAscending(tab.name, ascending)
     }
 
     fun setLibraryColumns(columns: LibraryColumnVisibility) {
@@ -3755,8 +3756,8 @@ class AppState(
         dependencies.libraryPreferencesService.setArtistGridItemSize(sizeDp)
     }
 
-    fun setLibraryViewMode(viewMode: String) = scope.launch {
-        dependencies.libraryPreferencesService.setViewMode(viewMode)
+    fun setLibraryViewMode(tab: LibraryFilterTab, viewMode: String) = scope.launch {
+        dependencies.libraryPreferencesService.setViewMode(tab.name, viewMode)
     }
 
     fun refreshInternetRadio() = scope.launch {

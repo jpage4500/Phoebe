@@ -106,8 +106,8 @@ fun LibraryMobileView(
     filter: LibraryFilterTab,
     libraryUi: LibraryUiPreferences,
     onFilter: (LibraryFilterTab) -> Unit,
-    onLibrarySortBy: (LibrarySortBy) -> Unit,
-    onLibraryAscending: (Boolean) -> Unit,
+    onLibrarySortBy: (LibraryFilterTab, LibrarySortBy) -> Unit,
+    onLibraryAscending: (LibraryFilterTab, Boolean) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
     onArtist: (Artist) -> Unit,
     onAlbum: (Album) -> Unit,
@@ -125,8 +125,10 @@ fun LibraryMobileView(
 ) {
     var pageIndex by remember(filter) { mutableStateOf(0) }
 
-    val ascending = libraryUi.ascending
-    val sortBy = libraryUi.sortBy
+    // Each tab keeps its own sort and order.
+    val tabUi = libraryUi.forTab(filter.name)
+    val ascending = tabUi.ascending
+    val sortBy = tabUi.sortBy
 
     val sortedArtists = remember(catalog.artists, sortBy, ascending) {
         sortArtistsForLibrary(catalog, sortBy, ascending)
@@ -309,16 +311,17 @@ private fun MobileLibraryHeader(
 fun FavoriteArtistsMobileView(
     catalog: CatalogSnapshot,
     libraryUi: LibraryUiPreferences,
-    onLibrarySortBy: (LibrarySortBy) -> Unit,
-    onLibraryAscending: (Boolean) -> Unit,
+    onLibrarySortBy: (LibraryFilterTab, LibrarySortBy) -> Unit,
+    onLibraryAscending: (LibraryFilterTab, Boolean) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
     onArtist: (Artist) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var viewMode by remember { mutableStateOf(LibraryViewMode.Grid) }
-    val favoriteArtists = remember(catalog, libraryUi.sortBy, libraryUi.ascending) {
-        sortArtistsForLibrary(catalog, libraryUi.sortBy, libraryUi.ascending).filter { it.favorite }
+    val tabUi = libraryUi.forTab(LibraryFilterTab.Artists.name)
+    val favoriteArtists = remember(catalog, tabUi.sortBy, tabUi.ascending) {
+        sortArtistsForLibrary(catalog, tabUi.sortBy, tabUi.ascending).filter { it.favorite }
     }
     val chromePadding = LocalMobileChromePadding.current
     Column(
@@ -341,9 +344,9 @@ fun FavoriteArtistsMobileView(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             LibraryFilterOptionsMenu(
                 filter = LibraryFilterTab.Artists,
-                prefs = libraryUi,
-                onSortBy = onLibrarySortBy,
-                onAscending = onLibraryAscending,
+                prefs = tabUi,
+                onSortBy = { onLibrarySortBy(LibraryFilterTab.Artists, it) },
+                onAscending = { onLibraryAscending(LibraryFilterTab.Artists, it) },
                 libraryViewMode = viewMode,
                 onLibraryViewMode = { viewMode = it },
                 onColumns = onLibraryColumns,
@@ -354,8 +357,8 @@ fun FavoriteArtistsMobileView(
             artists = favoriteArtists,
             viewMode = viewMode,
             artistGridItemSizeDp = libraryUi.artistGridItemSizeDp,
-            sortBy = libraryUi.sortBy,
-            ascending = libraryUi.ascending,
+            sortBy = tabUi.sortBy,
+            ascending = tabUi.ascending,
             onArtist = onArtist,
         )
     }
@@ -365,16 +368,17 @@ fun FavoriteArtistsMobileView(
 fun FavoriteAlbumsMobileView(
     catalog: CatalogSnapshot,
     libraryUi: LibraryUiPreferences,
-    onLibrarySortBy: (LibrarySortBy) -> Unit,
-    onLibraryAscending: (Boolean) -> Unit,
+    onLibrarySortBy: (LibraryFilterTab, LibrarySortBy) -> Unit,
+    onLibraryAscending: (LibraryFilterTab, Boolean) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
     onAlbum: (Album) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var viewMode by remember { mutableStateOf(LibraryViewMode.Grid) }
-    val favoriteAlbums = remember(catalog.albums, libraryUi.sortBy, libraryUi.ascending) {
-        sortAlbumsForLibrary(catalog.albums, libraryUi.sortBy, libraryUi.ascending).filter { it.favorite }
+    val tabUi = libraryUi.forTab(LibraryFilterTab.Albums.name)
+    val favoriteAlbums = remember(catalog.albums, tabUi.sortBy, tabUi.ascending) {
+        sortAlbumsForLibrary(catalog.albums, tabUi.sortBy, tabUi.ascending).filter { it.favorite }
     }
     val chromePadding = LocalMobileChromePadding.current
     Column(
@@ -397,9 +401,9 @@ fun FavoriteAlbumsMobileView(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             LibraryFilterOptionsMenu(
                 filter = LibraryFilterTab.Albums,
-                prefs = libraryUi,
-                onSortBy = onLibrarySortBy,
-                onAscending = onLibraryAscending,
+                prefs = tabUi,
+                onSortBy = { onLibrarySortBy(LibraryFilterTab.Albums, it) },
+                onAscending = { onLibraryAscending(LibraryFilterTab.Albums, it) },
                 libraryViewMode = viewMode,
                 onLibraryViewMode = { viewMode = it },
                 onColumns = onLibraryColumns,
@@ -411,8 +415,8 @@ fun FavoriteAlbumsMobileView(
             albums = favoriteAlbums,
             viewMode = viewMode,
             albumGridItemSizeDp = libraryUi.albumGridItemSizeDp,
-            sortBy = libraryUi.sortBy,
-            ascending = libraryUi.ascending,
+            sortBy = tabUi.sortBy,
+            ascending = tabUi.ascending,
             onAlbum = onAlbum,
         )
     }

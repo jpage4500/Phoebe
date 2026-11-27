@@ -14,12 +14,12 @@ import dev.zacsweers.metro.SingleIn
 class LibraryPreferencesService(
     private val libraryUiRepository: LibraryUiRepository,
 ) {
-    suspend fun setSortBy(sortBy: LibrarySortBy) {
-        libraryUiRepository.setSortBy(sortBy)
+    suspend fun setSortBy(tab: String, sortBy: LibrarySortBy) {
+        libraryUiRepository.setSortBy(tab, sortBy)
     }
 
-    suspend fun setAscending(ascending: Boolean) {
-        libraryUiRepository.setAscending(ascending)
+    suspend fun setAscending(tab: String, ascending: Boolean) {
+        libraryUiRepository.setAscending(tab, ascending)
     }
 
     fun applyColumns(columns: LibraryColumnVisibility) {
@@ -50,7 +50,7 @@ class LibraryPreferencesService(
         libraryUiRepository.setArtistGridItemSize(sizeDp)
     }
 
-    suspend fun setViewMode(viewMode: String) {
-        libraryUiRepository.setViewMode(viewMode)
+    suspend fun setViewMode(tab: String, viewMode: String) {
+        libraryUiRepository.setViewMode(tab, viewMode)
     }
 }

@@ -341,10 +341,10 @@ internal fun MobileBrowseShell(
     onAddLocalFolder: (String?) -> Unit,
     onRefreshLibrary: () -> Unit,
     onJellyfinPage: (JellyfinLibraryPageKind, Int) -> Unit = { _, _ -> },
-    onLibrarySortBy: (LibrarySortBy) -> Unit,
-    onLibraryAscending: (Boolean) -> Unit,
+    onLibrarySortBy: (LibraryFilterTab, LibrarySortBy) -> Unit,
+    onLibraryAscending: (LibraryFilterTab, Boolean) -> Unit,
     onLibraryColumns: (LibraryColumnVisibility) -> Unit,
-    onLibraryViewMode: (LibraryViewMode) -> Unit = {},
+    onLibraryViewMode: (LibraryFilterTab, LibraryViewMode) -> Unit = { _, _ -> },
     onHomeSections: (List<HomeSection>) -> Unit,
     onMobileBottomTabs: (List<MobileBottomTab>) -> Unit = {},
     onPersonalMix: (PersonalMixPreferences) -> Unit,
@@ -459,7 +459,9 @@ internal fun MobileBrowseShell(
     }
     // The query itself resets on section change upstream; the expanded field should too.
     var toolbarSearchExpanded by remember(section, selectedPlaylistId) { mutableStateOf(false) }
-    val mobileLibraryViewMode = libraryUi.resolvedViewMode()
+    // Each library tab keeps its own sort, order and view.
+    val libraryTabUi = libraryUi.forTab(libraryFilter.name)
+    val mobileLibraryViewMode = libraryTabUi.resolvedViewMode()
     val pickLocalFolder = rememberPickLocalFolder(onPicked = onAddLocalFolder)
     val availableUpdate = when (val updateState = appUpdateState) {
         is AppUpdateState.Available -> updateState.update
@@ -583,11 +585,11 @@ internal fun MobileBrowseShell(
                     )
                     LibraryFilterOptionsMenuItems(
                         filter = libraryFilter,
-                        prefs = libraryUi,
-                        onSortBy = onLibrarySortBy,
-                        onAscending = onLibraryAscending,
+                        prefs = libraryTabUi,
+                        onSortBy = { onLibrarySortBy(libraryFilter, it) },
+                        onAscending = { onLibraryAscending(libraryFilter, it) },
                         libraryViewMode = mobileLibraryViewMode,
-                        onLibraryViewMode = onLibraryViewMode,
+                        onLibraryViewMode = { onLibraryViewMode(libraryFilter, it) },
                         onColumns = onLibraryColumns,
                         onDismiss = { menuExpanded = false },
                     )
