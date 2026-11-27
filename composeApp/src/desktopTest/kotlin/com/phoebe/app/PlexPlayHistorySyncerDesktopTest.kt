@@ -305,6 +305,7 @@ class PlexPlayHistorySyncerDesktopTest {
             replayGainTrackPeak = null,
             replayGainAlbumGainDb = null,
             replayGainAlbumPeak = null,
+            isExternal = 0L,
         )
         val repo = PlayHistoryRepository(db)
         repository = repo

@@ -1,0 +1,3 @@
+-- Keeps the Octo "not in library" flag on cached tracks, so playlist rows and the queue
+-- can still badge songs the server streams but hasn't added to the library yet.
+ALTER TABLE TrackRow ADD COLUMN isExternal INTEGER NOT NULL DEFAULT 0;

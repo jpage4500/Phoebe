@@ -8085,6 +8085,7 @@ class CatalogRepository(
             replayGainTrackPeak = replayGainTrackPeak?.toFloat(),
             replayGainAlbumGainDb = replayGainAlbumGainDb?.toFloat(),
             replayGainAlbumPeak = replayGainAlbumPeak?.toFloat(),
+            isExternal = isExternal != 0L,
         )
 
     private fun warmLikelyClickedContent(session: PlexSession?, snapshot: CatalogSnapshot) {
@@ -8252,6 +8253,7 @@ class CatalogRepository(
                         replayGainTrackPeak = track.replayGainTrackPeak?.toDouble(),
                         replayGainAlbumGainDb = track.replayGainAlbumGainDb?.toDouble(),
                         replayGainAlbumPeak = track.replayGainAlbumPeak?.toDouble(),
+                        isExternal = if (track.isExternal) 1L else 0L,
                     )
                     syncedTrackIdsDuringRefresh.add(track.id)
                 }
@@ -8555,6 +8557,7 @@ class CatalogRepository(
                     replayGainTrackPeak = track.replayGainTrackPeak?.toDouble(),
                     replayGainAlbumGainDb = track.replayGainAlbumGainDb?.toDouble(),
                     replayGainAlbumPeak = track.replayGainAlbumPeak?.toDouble(),
+                    isExternal = if (track.isExternal) 1L else 0L,
                 )
             }
             database.catalogQueries.deleteTrackParents(playlistId)
@@ -8623,6 +8626,7 @@ class CatalogRepository(
                     replayGainTrackPeak = track.replayGainTrackPeak?.toDouble(),
                     replayGainAlbumGainDb = track.replayGainAlbumGainDb?.toDouble(),
                     replayGainAlbumPeak = track.replayGainAlbumPeak?.toDouble(),
+                    isExternal = if (track.isExternal) 1L else 0L,
                 )
             }
             tracksByParent.forEach { (parentId, tracks) ->
@@ -8729,6 +8733,7 @@ class CatalogRepository(
             replayGainTrackPeak = track.replayGainTrackPeak?.toDouble(),
             replayGainAlbumGainDb = track.replayGainAlbumGainDb?.toDouble(),
             replayGainAlbumPeak = track.replayGainAlbumPeak?.toDouble(),
+            isExternal = if (track.isExternal) 1L else 0L,
         )
     }
 
@@ -8848,6 +8853,7 @@ class CatalogRepository(
                     replayGainTrackPeak = track.replayGainTrackPeak?.toDouble(),
                     replayGainAlbumGainDb = track.replayGainAlbumGainDb?.toDouble(),
                     replayGainAlbumPeak = track.replayGainAlbumPeak?.toDouble(),
+                    isExternal = if (track.isExternal) 1L else 0L,
                 )
             }
             snapshot.tracksByParent.forEach { (parentId, tracks) ->

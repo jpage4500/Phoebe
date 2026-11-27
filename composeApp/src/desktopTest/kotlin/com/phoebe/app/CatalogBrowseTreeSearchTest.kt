@@ -264,6 +264,7 @@ class CatalogBrowseTreeSearchTest {
             replayGainTrackPeak = null,
             replayGainAlbumGainDb = null,
             replayGainAlbumPeak = null,
+            isExternal = 0L,
         )
     }
 }

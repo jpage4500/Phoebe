@@ -90,6 +90,7 @@ class DatabaseWiperDesktopTest {
                     replayGainTrackPeak = null,
                     replayGainAlbumGainDb = null,
                     replayGainAlbumPeak = null,
+                    isExternal = 0L,
                 )
                 database.catalogQueries.upsertTrackParent("album", "track", 0L, null)
                 database.catalogQueries.upsertLibraryPopularTrack("plex:server:library", "track", 0L, 1L)

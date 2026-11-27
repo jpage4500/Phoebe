@@ -86,7 +86,8 @@ CREATE TABLE TrackRow (
     albumSort TEXT,
     dateAddedMs INTEGER,
     rating REAL,
-    parentAlbumId TEXT
+    parentAlbumId TEXT,
+    isExternal INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE TrackParentRow (
@@ -285,13 +286,13 @@ upsertTrack:
 INSERT OR REPLACE INTO TrackRow(
     id, title, artist, album, durationMs, streamUrl, downloadUrl,
     thumbUrl, localArtworkUri, localUri, year, genre, mood, style, filepath, audioCodec, bitrateKbps, dateAddedMs, rating, parentAlbumId,
-    replayGainTrackGainDb, replayGainTrackPeak, replayGainAlbumGainDb, replayGainAlbumPeak
+    replayGainTrackGainDb, replayGainTrackPeak, replayGainAlbumGainDb, replayGainAlbumPeak, isExternal
 ) VALUES (
     :id, :title, :artist, :album, :durationMs, :streamUrl, :downloadUrl,
     :thumbUrl, :localArtworkUri,
     coalesce(nullif(:localUri, ''), (SELECT existing.localUri FROM TrackRow existing WHERE existing.id = :id)),
     :year, :genre, :mood, :style, :filepath, :audioCodec, :bitrateKbps, :dateAddedMs, :rating, :parentAlbumId,
-    :replayGainTrackGainDb, :replayGainTrackPeak, :replayGainAlbumGainDb, :replayGainAlbumPeak
+    :replayGainTrackGainDb, :replayGainTrackPeak, :replayGainAlbumGainDb, :replayGainAlbumPeak, :isExternal
 );
 
 clearTrackLocalUri:
