@@ -1363,12 +1363,25 @@ fun MobileSongRow(
                 fontWeight = FontWeight.SemiBold,
                 lineHeight = 15.sp,
             )
-            MobileSongRowText(
-                track.artist,
-                color = PhoebeUi.secondaryText,
-                fontSize = 11.sp,
-                lineHeight = 13.sp,
-            )
+            if (track.isExternal) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ExternalTrackBadge()
+                    MobileSongRowText(
+                        track.artist,
+                        color = PhoebeUi.secondaryText,
+                        fontSize = 11.sp,
+                        lineHeight = 13.sp,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                }
+            } else {
+                MobileSongRowText(
+                    track.artist,
+                    color = PhoebeUi.secondaryText,
+                    fontSize = 11.sp,
+                    lineHeight = 13.sp,
+                )
+            }
             if (track.album.isNotBlank()) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     MobileSongRowText(

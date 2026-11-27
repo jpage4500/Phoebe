@@ -73,6 +73,7 @@ import com.phoebe.app.domain.filterWith
 import com.phoebe.app.domain.parseAdvancedSearchQuery
 import com.phoebe.app.ui.ArtworkImage
 import com.phoebe.app.ui.AutoScrollingText
+import com.phoebe.app.ui.ExternalTrackBadge
 import com.phoebe.app.ui.LikeButton
 import com.phoebe.app.ui.LocalLikeActions
 import com.phoebe.app.ui.LocalMobileChromePadding
@@ -1454,23 +1455,6 @@ private fun RecentSearchRemoveButton(onRemove: () -> Unit) {
 /** Null when the server didn't report a length (common for Octo songs not in the library yet). */
 internal fun searchDurationLabel(track: Track): String? =
     track.durationMs.takeIf { it > 0 }?.let(::formatDuration)
-
-/** Marks a server search hit that isn't in the library yet (Octo `isExternal`). */
-@Composable
-internal fun ExternalTrackBadge() {
-    Text(
-        "Not in library",
-        color = PhoebeUi.accentLight,
-        fontSize = 9.sp,
-        fontWeight = FontWeight.SemiBold,
-        maxLines = 1,
-        softWrap = false,
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .border(BorderStroke(1.dp, PhoebeUi.accentLight.copy(alpha = 0.45f)), RoundedCornerShape(999.dp))
-            .padding(horizontal = 6.dp, vertical = 1.dp),
-    )
-}
 
 /** Hearting an external song stars it on the server, which makes Octo download it into the library. */
 @Composable

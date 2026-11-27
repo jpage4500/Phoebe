@@ -403,6 +403,23 @@ fun LikeButton(
     }
 }
 
+/** Marks a song the server can stream but that isn't in the library yet (Octo `isExternal`). */
+@Composable
+fun ExternalTrackBadge(modifier: Modifier = Modifier) {
+    Text(
+        "Not in library",
+        color = PhoebeUi.accentLight,
+        fontSize = 9.sp,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        softWrap = false,
+        modifier = modifier
+            .clip(RoundedCornerShape(999.dp))
+            .border(BorderStroke(1.dp, PhoebeUi.accentLight.copy(alpha = 0.45f)), RoundedCornerShape(999.dp))
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    )
+}
+
 @Composable
 fun TrackStateBadges(
     liked: Boolean,

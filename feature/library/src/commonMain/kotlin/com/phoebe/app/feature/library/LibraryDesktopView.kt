@@ -2563,7 +2563,14 @@ fun SongRow(
                 modifier = Modifier.sharedBoundsTransition(sharedKey?.let { "$it:title" }),
             )
         }
-        TableCellText(track.artist, modifier = Modifier.weight(1.4f), color = PhoebeUi.secondaryText)
+        if (track.isExternal) {
+            Row(Modifier.weight(1.4f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ExternalTrackBadge()
+                TableCellText(track.artist, modifier = Modifier.weight(1f), color = PhoebeUi.secondaryText)
+            }
+        } else {
+            TableCellText(track.artist, modifier = Modifier.weight(1.4f), color = PhoebeUi.secondaryText)
+        }
         TableAlbumCell(
             album = track.album,
             downloaded = downloaded,
